@@ -1,0 +1,49 @@
+# Fly.io. Singapore, because Neon is in Singapore.
+#
+# A request makes one hop from the user to the API and many queries from the API to the
+# database. Co-located, those queries cost about 1 ms. Split across regions they cost about
+# 80 ms each and no amount of application tuning gets that back. Never move one without the
+# other.
+
+app = "haazir-api"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  APP_ENV = "prod"
+  LOG_LEVEL = "INFO"
+  # The web app is on a different site, so the refresh cookie has to be allowed cross-site.
+  # See the note in config.py; `lax` here means sessions die after thirty minutes.
+  COOKIE_SAMESITE = "none"
+  COOKIE_SECURE = "true"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  # Not zero. The SSE hub is in-process, so a cold start drops every live subscriber, and
+  # scaling to zero on an API whose whole point is a live feed is a false economy.
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 180
+    hard_limit = 250
+
+[[http_service.checks]]
+  grace_period = "15s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+# Secrets are never in this file. See README.md "Deploy" for the full list and why each
+# one is needed; `fly secrets set` takes them all in one call.

@@ -1,0 +1,31 @@
+# This directory used to sit inside a larger repository and relied on its .gitignore. As its
+# own repository it needs one, and the first entry is the whole reason: `.env` holds the Neon
+# connection string, the JWT secret and two provider API keys.
+
+# Secrets. Never. `.env.example` documents the keys with no values.
+.env
+.env.*
+!.env.example
+
+# Virtualenv
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local scratch
+.scratch/
+.neon

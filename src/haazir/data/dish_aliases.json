@@ -1,0 +1,351 @@
+{
+  "bihari boti": [
+    "behari boti",
+    "bihari kabab",
+    "bihari tikka",
+    "behari kabab",
+    "bihari kebab",
+    "bahari boti",
+    "beyhari boti"
+  ],
+  "malai boti": [
+    "malai tikka boti",
+    "creamy boti",
+    "malai tikka",
+    "malayi boti",
+    "malai boti tikka"
+  ],
+  "seekh kabab": [
+    "sikh kabab",
+    "seekh kebab",
+    "seekh",
+    "sheekh kabab",
+    "seekh kabab beef",
+    "sikh kebab",
+    "seek kabab"
+  ],
+  "nihari": [
+    "nehari",
+    "nihaari",
+    "special nihari",
+    "beef nihari",
+    "nihari beef",
+    "nahari",
+    "niharee"
+  ],
+  "haleem": [
+    "daleem",
+    "hleem",
+    "halim",
+    "haleem beef",
+    "khichra"
+  ],
+  "biryani": [
+    "briyani",
+    "biriyani",
+    "bryani",
+    "biryani rice",
+    "biriani",
+    "beriyani",
+    "biryan"
+  ],
+  "karahi": [
+    "karhai",
+    "kadai",
+    "kadhai",
+    "karahi gosht",
+    "kadhai",
+    "karai",
+    "korahi"
+  ],
+  "paratha": [
+    "prata",
+    "parantha",
+    "paranthaa",
+    "porotha"
+  ],
+  "paratha roll": [
+    "prata roll",
+    "parantha roll",
+    "paratha rolls"
+  ],
+  "chapli kabab": [
+    "chappal kabab",
+    "chapli kebab",
+    "chaplee kabab",
+    "chapli"
+  ],
+  "halwa puri": [
+    "halwa poori",
+    "nashta",
+    "halwa pori",
+    "halwapuri",
+    "puri halwa"
+  ],
+  "falooda": [
+    "faluda",
+    "phalooda",
+    "falooda kulfi",
+    "faloodah"
+  ],
+  "chicken tikka": [
+    "tikka chicken",
+    "chicken teeka",
+    "chicken tika"
+  ],
+  "mutton karahi": [
+    "mutton kadai",
+    "mutton kadhai",
+    "mutton karhai"
+  ],
+  "chicken karahi": [
+    "chicken kadai",
+    "chicken kadhai",
+    "chicken karhai",
+    "murgh karahi"
+  ],
+  "chicken handi": [
+    "handi chicken",
+    "murgh handi",
+    "chicken white handi",
+    "white handi"
+  ],
+  "dal makhani": [
+    "daal makhani",
+    "dal makhni",
+    "daal makhni"
+  ],
+  "daal": [
+    "dal",
+    "daal fry",
+    "dal fry",
+    "daal tarka",
+    "dal tarka",
+    "tarka daal"
+  ],
+  "kebab roll": [
+    "kabab roll",
+    "kabab rol",
+    "kebab rol",
+    "roll kabab"
+  ],
+  "shawarma": [
+    "shwarma",
+    "shawerma",
+    "shwarama",
+    "shawarma roll"
+  ],
+  "zinger burger": [
+    "zingr burger",
+    "zinger brgr",
+    "chicken zinger",
+    "zinger"
+  ],
+  "beef burger": [
+    "burger beef",
+    "beef brgr"
+  ],
+  "club sandwich": [
+    "clup sandwich",
+    "club sandwhich",
+    "club sandwitch"
+  ],
+  "mutton pulao": [
+    "mutton pulav",
+    "mutton palao",
+    "mutton yakhni pulao",
+    "yakhni pulao"
+  ],
+  "chicken pulao": [
+    "chicken pulav",
+    "chicken palao"
+  ],
+  "beef pulao": [
+    "beef pulav",
+    "beef palao"
+  ],
+  "chicken cheese steak": [
+    "chicken cheesesteak",
+    "cheese steak chicken"
+  ],
+  "mutton kabab": [
+    "mutton kebab",
+    "muttton kabab"
+  ],
+  "gola kabab": [
+    "golla kabab",
+    "gola kebab"
+  ],
+  "dhaga kabab": [
+    "dhagay kabab",
+    "dhaga kebab",
+    "dhaaga kabab"
+  ],
+  "reshmi kabab": [
+    "reshmi kebab",
+    "resham kabab"
+  ],
+  "behari tikka": [
+    "bihari tikka boti"
+  ],
+  "tandoori roti": [
+    "tandori roti",
+    "roti tandoori"
+  ],
+  "khameeri roti": [
+    "khamiri roti",
+    "khameri roti"
+  ],
+  "naan": [
+    "nan",
+    "naan roti",
+    "plain naan"
+  ],
+  "roghni naan": [
+    "rogni naan",
+    "roghani naan"
+  ],
+  "garlic naan": [
+    "garlick naan",
+    "garlic nan"
+  ],
+  "kheer": [
+    "kheer rice pudding",
+    "khir"
+  ],
+  "gulab jamun": [
+    "gulab jaman",
+    "gulaab jamun",
+    "golab jamun"
+  ],
+  "rabri": [
+    "rabdi",
+    "rabari"
+  ],
+  "kulfi": [
+    "qulfi",
+    "kulfa"
+  ],
+  "lassi": [
+    "lasi",
+    "sweet lassi"
+  ],
+  "chai": [
+    "tea",
+    "doodh patti",
+    "dodh pati",
+    "karak chai",
+    "chaye"
+  ],
+  "kashmiri chai": [
+    "kashmiri tea",
+    "pink tea",
+    "gulabi chai"
+  ],
+  "sheer khurma": [
+    "sheerkhurma",
+    "shir khurma"
+  ],
+  "shami kabab": [
+    "shaami kabab",
+    "shami kebab"
+  ],
+  "fish tikka": [
+    "tikka fish",
+    "fish teeka"
+  ],
+  "prawn karahi": [
+    "prawns karahi",
+    "jhinga karahi",
+    "shrimp karahi"
+  ],
+  "grilled fish": [
+    "fish grilled",
+    "grill fish"
+  ],
+  "fried fish": [
+    "fish fry",
+    "fish fried"
+  ],
+  "chicken broast": [
+    "broast chicken",
+    "chiken broast",
+    "broasted chicken"
+  ],
+  "samosa": [
+    "samosay",
+    "sambosa"
+  ],
+  "pakora": [
+    "pakoray",
+    "pakodas",
+    "pakauras"
+  ],
+  "dahi bhalla": [
+    "dahi bhaley",
+    "dahi bara",
+    "dahi baray"
+  ],
+  "chana chaat": [
+    "chana chat",
+    "cholay chaat",
+    "chola chaat"
+  ],
+  "cholay": [
+    "chholay",
+    "chana",
+    "chole"
+  ],
+  "aloo keema": [
+    "alu keema",
+    "keema aloo"
+  ],
+  "keema": [
+    "qeema",
+    "keema fry"
+  ],
+  "murgh cholay": [
+    "murghi cholay",
+    "chicken cholay"
+  ],
+  "paya": [
+    "payay",
+    "siri paya",
+    "sri paya"
+  ],
+  "kunna": [
+    "kunnah"
+  ],
+  "sajji": [
+    "saji",
+    "sajii"
+  ],
+  "mutton raan": [
+    "raan mutton",
+    "raan"
+  ],
+  "peshawari karahi": [
+    "peshawri karahi",
+    "peshawar karahi"
+  ],
+  "maghaz masala": [
+    "brain masala",
+    "magaz masala",
+    "maghaz",
+    "maghz masala"
+  ],
+  "_readme": [
+    "canonical name_normalized  ->  spelling variants that must collapse into it.",
+    "name_normalized is the join key for cross-venue price comparison. If",
+    "'Bihari Boti', 'Behari boti' and 'bihari-boti' do not collapse to one",
+    "string the comparison feature returns nothing and nobody finds out why.",
+    "",
+    "Matching is done on the already-cleaned string (lowercased, unaccented,",
+    "punctuation stripped, marketing words dropped, portion words moved into",
+    "price_unit, singularised). Add variants freely; this file is data, and",
+    "extending it does not require touching normalise.py.",
+    "",
+    "The starting set is docs/SCRAPING-PROMPT.md section 5, extended with the",
+    "spellings that actually show up on foodpanda.pk listings."
+  ]
+}

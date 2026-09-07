@@ -1,0 +1,59 @@
+[project]
+name = "haazir-api"
+version = "0.1.0"
+description = "HAAZIR — live restaurant intelligence for Karachi. Backend API."
+requires-python = ">=3.13"
+
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.34",
+  "sqlalchemy[asyncio]>=2.0.36",
+  "asyncpg>=0.30",
+  "alembic>=1.14",
+  "geoalchemy2>=0.16",
+  "pgvector>=0.3.6",
+  "pydantic>=2.10",
+  "pydantic-settings>=2.7",
+  "email-validator>=2.2",
+  "pyjwt>=2.10",
+  "httpx>=0.28",
+  "orjson>=3.10",
+  "apscheduler>=3.11",
+  "python-multipart>=0.0.20",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.25",
+  "ruff>=0.9",
+]
+obs = [
+  "sentry-sdk[fastapi]>=2.20",
+]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# One event loop for the whole run. `db.py` builds its engine at import time, and an asyncpg
+# connection belongs to the loop that opened it; with a loop per test the second test to
+# touch the database gets "Future attached to a different loop". A server has one loop for
+# its process lifetime, so this is also the arrangement the code actually ships into.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+pythonpath = ["src"]
