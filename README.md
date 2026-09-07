@@ -158,7 +158,7 @@ regions about 80 ms each. Never move one without the other.
 # From api/. Schema first, from your machine — see the note below on why not the container.
 alembic upgrade head
 
-fly launch --no-deploy --region sin --name haazir-api
+fly launch --no-deploy --region sin --name haazir-backend
 
 # Reads api/.env, sends the values over stdin, prints only the key names. It derives
 # CORS_ORIGINS and WEB_BASE_URL from the frontend URL rather than copying the localhost ones,
@@ -167,7 +167,7 @@ fly launch --no-deploy --region sin --name haazir-api
 
 fly deploy
 fly logs                     # "database ok" and "scheduler started" mean it is up
-curl -s https://haazir-api.fly.dev/health/db
+curl -s https://haazir-backend.fly.dev/health/db
 ```
 
 **`COOKIE_SAMESITE=none` is set in `fly.toml`, and it matters.** The web app is on

@@ -5,7 +5,7 @@
 # 80 ms each and no amount of application tuning gets that back. Never move one without the
 # other.
 
-app = "haazir-api"
+app = "haazir-backend"
 primary_region = "sin"
 
 [build]

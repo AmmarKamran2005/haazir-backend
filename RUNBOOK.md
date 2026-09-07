@@ -8,8 +8,8 @@ Companion to [`README.md`](README.md), which covers how to run it normally.
 ## Is it up?
 
 ```bash
-curl -s https://haazir-api.fly.dev/health
-curl -s https://haazir-api.fly.dev/health/db
+curl -s https://haazir-backend.fly.dev/health
+curl -s https://haazir-backend.fly.dev/health/db
 ```
 
 `/health` answers without touching the database, so it stays green through a database blip
@@ -34,7 +34,7 @@ If it persists:
 
 ```bash
 neon branches list --project-id morning-wind-72754130
-fly logs -a haazir-api | grep -i "database\|asyncpg"
+fly logs -a haazir-backend | grep -i "database\|asyncpg"
 ```
 
 **Connection pool exhausted.** `pool_size=5, max_overflow=5` per instance. If requests hang
@@ -99,7 +99,7 @@ calling Gemini and explanations come from templates. Nothing breaks and no error
 user, and `/v1/search` is unaffected because it never calls a model in the first place.
 
 ```bash
-curl -s https://haazir-api.fly.dev/v1/llm/status
+curl -s https://haazir-backend.fly.dev/v1/llm/status
 ```
 
 A 503 from Gemini, or a response slower than the 8 s timeout, lands in the same place: the
@@ -139,7 +139,7 @@ business.
 ### Code
 
 ```bash
-fly releases -a haazir-api
+fly releases -a haazir-backend
 fly deploy --image <previous image>
 ```
 
