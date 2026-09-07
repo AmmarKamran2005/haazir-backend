@@ -64,10 +64,13 @@ async def search(body: SearchIn, ctx: Ctx) -> dict:
     )
     # What the diner typed, turned into the filters that already existed and were never set.
     # Explicit fields win: a client that resolved an area itself is not second-guessed.
+    resolved = await locate.resolve(ctx.session, body.text)
     if q.area_id is None:
-        q.area_id = await locate.area_id_for(ctx.session, body.text)
+        q.area_id = resolved["area_id"]
     if q.cuisine is None:
-        q.cuisine = locate.cuisine_for(body.text)
+        q.cuisine = resolved["cuisine"]
+    if q.dish is None:
+        q.dish = resolved["dish"]
 
     # Naming an area names a destination, and a travel cap the diner never typed must not
     # exclude it. Clients send a default (30 min) on every query; from Burns Road that puts

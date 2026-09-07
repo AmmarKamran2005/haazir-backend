@@ -388,3 +388,57 @@ async def test_the_longer_area_name_wins(client):
     assert names.get(north) == "North Nazimabad"
     assert names.get(plain) == "Nazimabad"
     assert north != plain
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_misspelt_area_and_cuisine_still_resolve():
+    """People type "nazimbad" and "chineese", and an exact scan throws the word away silently.
+
+    Word-level rather than whole-phrase: "biryani in north nazimbad" scores badly against
+    "North Nazimabad" as one string and almost perfectly word by word. Every word of the name
+    must find a partner, which is what stops "Nazimabad" quietly satisfying "North Nazimabad".
+    """
+    from haazir.db import service_session
+    from haazir.services import locate
+    from sqlalchemy import text as sql
+
+    async with service_session() as s:
+        names = {r.id: r.name for r in (await s.execute(sql("SELECT id, name FROM area"))).all()}
+        assert names.get(await locate.area_id_for(s, "biryani in north nazimbad")) == "North Nazimabad"
+        assert names.get(await locate.area_id_for(s, "chineese in clifon")) == "Clifton"
+        assert names.get(await locate.area_id_for(s, "sadar mein biryani")) == "Saddar"
+        # And the distinction survives fuzzing: these are two different places.
+        assert names.get(await locate.area_id_for(s, "biryani in nazimabad")) == "Nazimabad"
+        # A sentence naming no area must not be forced into one.
+        assert await locate.area_id_for(s, "kuch bhi acha") is None
+
+    assert locate.cuisine_for("chineese") == "chinese"
+    assert locate.cuisine_for("biryni chahiye") == "biryani"
+    assert locate.cuisine_for("sasta aur jaldi") is None
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_the_model_cannot_invent_an_area(monkeypatch):
+    """The closed lists go into the prompt and the answer is checked against them coming back.
+
+    A model that returns "Gulshan-e-Maymar" — a real Karachi neighbourhood that is not in this
+    catalogue — must resolve to nothing rather than to a filter that matches no venue and looks
+    like an empty city.
+    """
+    from haazir.db import service_session
+    from haazir.services import llm, locate
+
+    async def fake_call(model, system, prompt, max_tokens=160):
+        return '{"area": "Gulshan-e-Maymar", "cuisine": "Klingon", "dish": "nihari"}'
+
+    monkeypatch.setattr(llm, "_call", fake_call)
+    monkeypatch.setattr(llm, "available", lambda: True)
+
+    async with service_session() as s:
+        out = await locate.resolve(s, "something with no keyword the rules can read")
+
+    assert out["area_id"] is None, "an area outside the catalogue must not become a filter"
+    assert out["cuisine"] is None, "a cuisine outside the closed list must be dropped"
+    assert out["dish"] == "nihari", "a free-text dish is allowed through"

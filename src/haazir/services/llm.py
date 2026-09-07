@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 import logging
 from dataclasses import dataclass, field
 
@@ -250,6 +251,63 @@ async def _call(model: str, system: str, prompt: str, max_tokens: int = 160) -> 
     except (httpx.HTTPError, ValueError, KeyError) as exc:
         log.warning("Gemini unreachable, using the template: %s", exc)
         return None
+
+
+# --- intent, when the deterministic passes found nothing ----------------------
+
+_INTENT_SYSTEM = (
+    "You extract search filters from what a diner in Karachi typed. Reply with JSON only.\n"
+    'Shape: {"area": string|null, "cuisine": string|null, "dish": string|null}\n'
+    "RULES:\n"
+    "- `area` must be one of the AREAS listed in the user message, copied exactly, or null.\n"
+    "- `cuisine` must be one of the CUISINES listed, copied exactly, or null.\n"
+    "- `dish` is a specific dish if one is named, else null.\n"
+    "- Roman Urdu, Urdu script and English all appear. 'sasta' is not a cuisine.\n"
+    "- Null is a good answer. Never guess an area from a venue name you happen to know."
+)
+
+
+async def extract_intent(
+    phrase: str, areas: list[str], cuisines: list[str]
+) -> dict[str, str | None]:
+    """`{area, cuisine, dish}` for a sentence the regex and fuzzy passes could not read.
+
+    The closed lists go in the prompt and the answer is checked against them on the way out,
+    so a hallucinated neighbourhood cannot become a filter. This is the only place a model
+    touches the search, and it runs only when the deterministic passes have already failed —
+    the cost is a handful of calls a day, not one per query.
+    """
+    empty: dict[str, str | None] = {"area": None, "cuisine": None, "dish": None}
+    if not available():
+        return empty
+
+    prompt = (
+        f"AREAS: {', '.join(areas)}\n"
+        f"CUISINES: {', '.join(cuisines)}\n\n"
+        f"Diner typed: {phrase}"
+    )
+    raw = await _call(MODEL_INTENT, _INTENT_SYSTEM, prompt, max_tokens=120)
+    if not raw:
+        return empty
+
+    try:
+        # Models like to wrap JSON in a fence however firmly you ask them not to.
+        cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
+        parsed = json.loads(cleaned.strip())
+    except (ValueError, AttributeError):
+        log.warning("intent extraction was not JSON: %s", raw[:120])
+        return empty
+
+    area = parsed.get("area")
+    cuisine = parsed.get("cuisine")
+    return {
+        # Checked against the closed lists, case-insensitively. Anything invented is dropped.
+        "area": next((a for a in areas if isinstance(area, str) and a.lower() == area.lower()), None),
+        "cuisine": next(
+            (c for c in cuisines if isinstance(cuisine, str) and c.lower() == cuisine.lower()), None
+        ),
+        "dish": parsed.get("dish") if isinstance(parsed.get("dish"), str) else None,
+    }
 
 
 # --- semantic cache -----------------------------------------------------------

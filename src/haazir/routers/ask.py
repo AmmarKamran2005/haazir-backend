@@ -58,10 +58,13 @@ async def ask(body: AskIn, ctx: Ctx) -> dict:
     )
 
     # Same resolution as /v1/search: the destination and the cuisine live in the sentence.
+    resolved = await locate.resolve(ctx.session, body.text)
     if query.area_id is None:
-        query.area_id = await locate.area_id_for(ctx.session, body.text)
+        query.area_id = resolved["area_id"]
     if query.cuisine is None:
-        query.cuisine = locate.cuisine_for(body.text)
+        query.cuisine = resolved["cuisine"]
+    if query.dish is None:
+        query.dish = resolved["dish"]
     if query.area_id is not None and not locate.mentions_a_time(body.text):
         query.max_travel = None
 
