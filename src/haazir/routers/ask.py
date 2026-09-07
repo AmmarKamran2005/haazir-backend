@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from ..auth.deps import Ctx
 from ..estimator.scoring import WEIGHTS, search_with_relaxation
-from ..services import intent as intent_service
+from ..services import intent as intent_service, locate
 from ..services import llm
 
 # How many results get a model-written sentence. The diner sees about six cards
@@ -56,6 +56,12 @@ async def ask(body: AskIn, ctx: Ctx) -> dict:
         limit=body.limit,
         city=body.city,
     )
+
+    # Same resolution as /v1/search: the destination and the cuisine live in the sentence.
+    if query.area_id is None:
+        query.area_id = await locate.area_id_for(ctx.session, body.text)
+    if query.cuisine is None:
+        query.cuisine = locate.cuisine_for(body.text)
 
     result = await search_with_relaxation(ctx.session, query)
     results = [r.as_dict() for r in result["results"]]

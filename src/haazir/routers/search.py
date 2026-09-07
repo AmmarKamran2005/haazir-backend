@@ -24,7 +24,7 @@ from sqlalchemy import text
 from ..auth.deps import Ctx
 from ..estimator import fusion, queueing
 from ..estimator.scoring import WEIGHTS, Query, search_with_relaxation
-from ..services import llm, lookup
+from ..services import llm, locate, lookup
 from ..services.clock import HOUR_OF_WEEK_SQL
 
 router = APIRouter(prefix="/v1", tags=["search"])
@@ -47,6 +47,7 @@ class SearchIn(BaseModel):
     needs_card: bool = False
     diet: list[str] = Field(default_factory=list, max_length=6,
                             description="nut_allergy | no_beef | vegetarian | halal")
+    area_id: int | None = None
     limit: int = Field(default=20, ge=1, le=50)
     city: str = "Karachi"
 
@@ -59,8 +60,15 @@ async def search(body: SearchIn, ctx: Ctx) -> dict:
         mood=body.mood, cuisine=body.cuisine, dish=body.dish,
         needs_prayer=body.needs_prayer, needs_family=body.needs_family,
         needs_ramp=body.needs_ramp, needs_card=body.needs_card, diet=body.diet,
-        limit=body.limit, city=body.city,
+        limit=body.limit, city=body.city, area_id=body.area_id,
     )
+    # What the diner typed, turned into the filters that already existed and were never set.
+    # Explicit fields win: a client that resolved an area itself is not second-guessed.
+    if q.area_id is None:
+        q.area_id = await locate.area_id_for(ctx.session, body.text)
+    if q.cuisine is None:
+        q.cuisine = locate.cuisine_for(body.text)
+
     result = await search_with_relaxation(ctx.session, q)
 
     # Every row explains itself, from the score's own terms. This is `llm.explain`, which is

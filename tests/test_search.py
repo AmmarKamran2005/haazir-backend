@@ -333,3 +333,58 @@ async def test_the_endpoint_enforces_the_allergy_filter(client, two_venues):
         )
     ).json()
     assert [r["name"] for r in body["results"]] == ["Plain But Suitable"]
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_named_area_and_cuisine_in_free_text_actually_filter(client, venue_factory):
+    """The filters existed and nothing ever set them.
+
+    `v.area_id` and the cuisines predicate were both in `hard_filter_sql` from the start, but
+    no code path populated `Query.area_id` or `Query.cuisine` from what a person typed. So
+    "chinese" returned a bakery and "biryani in North Nazimabad" returned Saddar — the text
+    went into the request and was never read.
+
+    The cuisine half also needed the comparison to stop being case-sensitive: the column holds
+    "Biryani" and people type "biryani", so `@>` matched nothing the moment it was fed.
+    """
+    from haazir.services import locate
+
+    assert locate.cuisine_for("i want chinese tonight") == "chinese"
+    assert locate.cuisine_for("kuch bhi") is None
+    # Longest alias wins, so a two-word cuisine is not lost to a one-word one.
+    assert locate.cuisine_for("fast food chahiye") == "fast food"
+
+    r = await client.post(
+        "/v1/search", json={"text": "chinese", "from_lat": 24.8615, "from_lng": 67.0180}
+    )
+    assert r.status_code == 200, r.text
+    for row in r.json()["results"]:
+        assert any(c.lower() == "chinese" for c in row["cuisines"]), row["name"]
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_the_longer_area_name_wins(client):
+    """North Nazimabad and Nazimabad are both areas, and one contains the other.
+
+    A naive scan finds the shorter name inside the longer one and sends the diner to a
+    different part of the city — which is exactly the failure this whole resolver exists to
+    fix, reintroduced by the fix itself.
+    """
+    from haazir.db import service_session
+    from haazir.services import locate
+
+    async with service_session() as s:
+        north = await locate.area_id_for(s, "biryani in north nazimabad")
+        plain = await locate.area_id_for(s, "biryani in nazimabad")
+        from sqlalchemy import text as sql
+
+        names = {
+            r.id: r.name
+            for r in (await s.execute(sql("SELECT id, name FROM area"))).all()
+        }
+
+    assert names.get(north) == "North Nazimabad"
+    assert names.get(plain) == "Nazimabad"
+    assert north != plain

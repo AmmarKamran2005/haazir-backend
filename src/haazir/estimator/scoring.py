@@ -76,6 +76,10 @@ class Query:
     open_now: bool = False
     limit: int = 20
     city: str = "Karachi"
+    # Where the diner wants to *eat*, not where they are. "biryani in North Nazimabad" is a
+    # statement about the destination, and without this it did nothing at all: the ranking
+    # was distance from a default origin, so the answer came back full of Saddar.
+    area_id: int | None = None
 
 
 @dataclass(slots=True)
@@ -158,6 +162,14 @@ def hard_filter_sql(q: Query, params: dict) -> list[str]:
     where = ["v.status = 'active'", "c.name = :city"]
     params["city"] = q.city
 
+    # A named area is a hard filter, not a nudge. Somebody who says North Nazimabad does not
+    # want Saddar ranked third; they want to know what is in North Nazimabad. If that turns
+    # out to be nothing, the relaxation path says so — which is a better answer than quietly
+    # widening the question.
+    if q.area_id is not None:
+        where.append("v.area_id = :area_id")
+        params["area_id"] = q.area_id
+
     if q.budget:
         # NULL avg_ticket is not silently dropped: a venue whose price nobody knows is still
         # a candidate, because excluding it would quietly shrink the city to the venues that
@@ -166,7 +178,12 @@ def hard_filter_sql(q: Query, params: dict) -> list[str]:
         params["budget_ceiling"] = int(q.budget * BUDGET_SLACK)
 
     if q.cuisine:
-        where.append("v.cuisines @> ARRAY[:cuisine]::text[]")
+        # Case-insensitive: the column stores "Biryani" and a person types "biryani". The
+        # array-contains operator is exact, so this filter matched nothing at all the moment
+        # anything started populating it.
+        where.append(
+            "EXISTS (SELECT 1 FROM unnest(v.cuisines) cu WHERE lower(cu) = lower(:cuisine))"
+        )
         params["cuisine"] = q.cuisine
 
     if q.dish:
