@@ -1,5 +1,7 @@
 # HAAZIR API
 
+*ForkSight AI — AI Hackathon Pakistan 2026. HAAZIR is the product.*
+
 **One of two repositories.** The API is here; the Next.js web app is at
 <https://github.com/AmmarKamran2005/haazir-frontend>. Running:
 <https://haazir-frontend.vercel.app>, against <https://haazir-backend.fly.dev>.
