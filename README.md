@@ -1,10 +1,14 @@
 # HAAZIR API
 
-FastAPI + Neon Postgres. Built from [`docs/BACKEND-PLAN.md`](../docs/BACKEND-PLAN.md), which
-stays the specification: this README covers how to run it, not why it is shaped this way.
+**One of two repositories.** The API is here; the Next.js web app is at
+<https://github.com/AmmarKamran2005/haazir-frontend>. Running:
+<https://haazir-frontend.vercel.app>, against <https://haazir-backend.fly.dev>.
 
-**Status: Phases 1 to 10 complete, less venue claims and offers. The Next.js frontend in
-[`web/`](../web/) runs against it.** Every surface in the
+FastAPI + Neon Postgres. Built from a written backend plan, which stays the specification:
+this README covers how to run it, not why it is shaped this way.
+
+**Status: Phases 1 to 10 complete, less venue claims and offers. The web app runs against
+it.** Every surface in the
 prototype has a real API behind it, the concierge answers in Roman Urdu with or without an
 LLM, enforcement records are ingested and human-reviewed before publication, and there is a
 [`RUNBOOK.md`](RUNBOOK.md) for when something goes wrong. What is not built is listed at the

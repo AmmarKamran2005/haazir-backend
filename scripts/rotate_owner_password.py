@@ -56,7 +56,7 @@ def _api(path: str, method: str = "GET") -> dict:
 
 
 def _branch_id_for_host(host: str) -> str:
-    """Map an endpoint host like `ep-late-tree-b3ww0ey6.c-4...` back to its branch id."""
+    """Map an endpoint host like `ep-example-host-a1b2c3d4.c-4...` back to its branch id."""
     endpoint_id = host.split(".")[0].removesuffix("-pooler")
     for ep in _api(f"/projects/{PROJECT_ID}/endpoints").get("endpoints", []):
         if ep.get("id") == endpoint_id:
