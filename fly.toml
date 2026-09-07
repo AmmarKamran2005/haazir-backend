@@ -1,49 +1,40 @@
-# Fly.io. Singapore, because Neon is in Singapore.
+# fly.toml app configuration file generated for haazir-backend on 2026-09-07T14:57:33Z
 #
-# A request makes one hop from the user to the API and many queries from the API to the
-# database. Co-located, those queries cost about 1 ms. Split across regions they cost about
-# 80 ms each and no amount of application tuning gets that back. Never move one without the
-# other.
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "haazir-backend"
-primary_region = "sin"
+app = 'haazir-backend'
+primary_region = 'sin'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
-  APP_ENV = "prod"
-  LOG_LEVEL = "INFO"
-  # The web app is on a different site, so the refresh cookie has to be allowed cross-site.
-  # See the note in config.py; `lax` here means sessions die after thirty minutes.
-  COOKIE_SAMESITE = "none"
-  COOKIE_SECURE = "true"
+  APP_ENV = 'prod'
+  COOKIE_SAMESITE = 'none'
+  COOKIE_SECURE = 'true'
+  LOG_LEVEL = 'INFO'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "suspend"
+  auto_stop_machines = 'suspend'
   auto_start_machines = true
-  # Not zero. The SSE hub is in-process, so a cold start drops every live subscriber, and
-  # scaling to zero on an API whose whole point is a live feed is a false economy.
   min_machines_running = 1
-  processes = ["app"]
+  processes = ['app']
 
   [http_service.concurrency]
-    type = "requests"
-    soft_limit = 180
+    type = 'requests'
     hard_limit = 250
+    soft_limit = 180
 
-[[http_service.checks]]
-  grace_period = "15s"
-  interval = "30s"
-  method = "GET"
-  timeout = "5s"
-  path = "/health"
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '15s'
+    method = 'GET'
+    path = '/health'
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb"
-
-# Secrets are never in this file. See README.md "Deploy" for the full list and why each
-# one is needed; `fly secrets set` takes them all in one call.
+  size = 'shared-cpu-1x'
+  memory = '512mb'
