@@ -457,6 +457,31 @@ async def search_with_relaxation(
     if result["results"]:
         return result
 
+    # A dish filter requires the dish on a *priced* menu, and menu coverage is 4% — 68 of
+    # 1,695 venues. So "biryani" as a dish finds almost nothing while "biryani" as a cuisine
+    # finds 72 venues, and the diner gets an empty screen for a word the catalogue plainly
+    # knows. Where the dish is also a cuisine, fall back to it before touching anything the
+    # diner actually asked for.
+    #
+    # This is a data-coverage limit, not a preference the diner stated, which is why it is
+    # relaxed first: widening their travel to work around our thin menus would be charging
+    # them for our gap.
+    if q.dish:
+        from ..services import locate
+
+        # Whichever cuisine we already resolved from the sentence, or the dish read as one.
+        as_cuisine = q.cuisine or locate.cuisine_for(q.dish)
+        if as_cuisine:
+            widened = dataclasses.replace(q, dish=None, cuisine=as_cuisine)
+            result = await search(session, widened, now)
+            if result["results"]:
+                result["relaxed"] = True
+                result["relaxed_note"] = (
+                    f"No venue here lists {q.dish} on a priced menu — menu data is thin. "
+                    f"These are {as_cuisine} places in the same area."
+                )
+                return result
+
     asked = q.max_travel or DEFAULT_MAX_TRAVEL
     nearest = await nearest_match_minutes(session, q, now)
     if nearest is not None and nearest > asked:
