@@ -62,6 +62,8 @@ async def ask(body: AskIn, ctx: Ctx) -> dict:
         query.area_id = await locate.area_id_for(ctx.session, body.text)
     if query.cuisine is None:
         query.cuisine = locate.cuisine_for(body.text)
+    if query.area_id is not None and not locate.mentions_a_time(body.text):
+        query.max_travel = None
 
     result = await search_with_relaxation(ctx.session, query)
     results = [r.as_dict() for r in result["results"]]

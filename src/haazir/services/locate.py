@@ -80,3 +80,12 @@ def cuisine_for(phrase: str | None) -> str | None:
                 if best is None or len(alias) > best[0]:
                     best = (len(alias), canonical)
     return best[1] if best else None
+
+
+# A time the diner actually typed, as opposed to the default every client sends. Used to
+# decide whether a travel cap is theirs or ours.
+_TIME_RE = re.compile(r"\d{1,3}\s*(min|minute|mint|minat|ghant|hour|hr)", re.I)
+
+
+def mentions_a_time(phrase: str | None) -> bool:
+    return bool(phrase and _TIME_RE.search(phrase))

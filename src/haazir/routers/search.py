@@ -69,6 +69,13 @@ async def search(body: SearchIn, ctx: Ctx) -> dict:
     if q.cuisine is None:
         q.cuisine = locate.cuisine_for(body.text)
 
+    # Naming an area names a destination, and a travel cap the diner never typed must not
+    # exclude it. Clients send a default (30 min) on every query; from Burns Road that puts
+    # North Nazimabad out of range, so "biryani in North Nazimabad" answered "nothing" about
+    # the one place the question was about. If they did state a time, it stands.
+    if q.area_id is not None and not locate.mentions_a_time(body.text):
+        q.max_travel = None
+
     result = await search_with_relaxation(ctx.session, q)
 
     # Every row explains itself, from the score's own terms. This is `llm.explain`, which is
