@@ -201,7 +201,7 @@ async def exchange_invite(body: GroupExchangeIn, ctx: Ctx) -> GroupTokenOut:
     except group_auth.InviteInvalid as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This invite has expired or has already been used.",
+            detail="This link has expired, or its answer has already been submitted. Ask the organiser for a new group link.",
         ) from exc
     return GroupTokenOut(
         access_token=token,

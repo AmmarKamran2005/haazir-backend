@@ -1,7 +1,8 @@
 """Group invite tokens. Plan §5, §3.8.
 
-Each member gets a one-time link. Opening it exchanges the opaque invite token for a guest
-JWT scoped to exactly one `(group_id, slot)` pair, valid for 24 hours. That JWT authorises
+Each member gets a personal link. Opening it exchanges the opaque invite token for a guest
+JWT scoped to exactly one `(group_id, slot)` pair, valid for 24 hours. The link stays good
+until that member has submitted their answer, and is spent from then on. That JWT authorises
 writing that slot's constraint and reading it back, and nothing else anywhere in the product.
 
 The exchange is deliberately one-way. There is no endpoint, for any role, that returns
@@ -57,8 +58,15 @@ async def issue_invites(
 async def exchange(session: AsyncSession, presented: str) -> tuple[str, uuid.UUID, int]:
     """Invite token in, guest JWT out. Returns `(jwt, group_id, slot)`.
 
-    Marking the invite consumed is part of the same conditional update that reads it, so two
-    people opening the same link at once cannot both get a token for that slot.
+    The link is **not** single-use before an answer exists. It used to be, and the failure
+    was ordinary rather than adversarial: a link opened in WhatsApp's in-app browser and then
+    again in Chrome, a message client that previews it, or the organiser testing it before
+    forwarding it, each spent the link and left the real person with "already used". Nothing is
+    protected by that: whoever opens a forwarded link first can answer for the slot either way.
+
+    What does protect the answer is the second condition. Once the member has submitted, the
+    link is dead, so a link found later in a chat history cannot be used to read the slot or
+    overwrite what was said. The guest token it hands out can only touch that one slot.
     """
     if not presented or not presented.startswith(INVITE_PREFIX):
         raise InviteInvalid("malformed")
@@ -68,10 +76,14 @@ async def exchange(session: AsyncSession, presented: str) -> tuple[str, uuid.UUI
             text(
                 """
                 UPDATE group_token
-                   SET consumed_at = now()
+                   SET consumed_at = COALESCE(consumed_at, now())
                  WHERE token_hash = :hash
-                   AND consumed_at IS NULL
                    AND expires_at > now()
+                   AND NOT EXISTS (
+                       SELECT 1 FROM group_member m
+                        WHERE m.group_id = group_token.group_id
+                          AND m.slot = group_token.member_slot
+                          AND m.responded_at IS NOT NULL)
              RETURNING id, group_id, member_slot, token_hash
                 """
             ),
@@ -80,7 +92,7 @@ async def exchange(session: AsyncSession, presented: str) -> tuple[str, uuid.UUI
     ).mappings().first()
 
     if row is None:
-        raise InviteInvalid("expired, already used, or unknown")
+        raise InviteInvalid("expired, already answered, or unknown")
     if not tokens_match(presented, row["token_hash"]):  # §5 rule 7
         raise InviteInvalid("mismatch")
 

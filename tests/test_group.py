@@ -105,8 +105,8 @@ async def create_group(client, members=None) -> dict:
 async def submit_all(client, group, members=None) -> dict[int, str]:
     """Submit for the first N members, and return each one's guest token by slot.
 
-    An invite link works exactly once, so a test that needs to act as a member afterwards has
-    to keep the token from here rather than exchange the same link a second time.
+    An invite link is spent once its member has answered, so a test that needs to act as that
+    member afterwards has to keep the token from here rather than exchange the link again.
     """
     members = members or SIX
     tokens: dict[int, str] = {}
@@ -269,9 +269,9 @@ async def test_a_guest_reads_back_only_their_own_answer(client, venues):
     tokens = await submit_all(client, group)
     gid = group["group_id"]
 
-    # The token from the submission. An invite link works exactly once, so exchanging it
-    # again here would 400 — which is itself the behaviour `test_an_invite_link_works_once`
-    # asserts on purpose.
+    # The token from the submission. The link is spent once the member has answered, so
+    # exchanging it again here would 400 — `test_an_invite_link_is_spent_once_its_member_has_
+    # answered` asserts that on purpose.
     headers = {"Authorization": f"Bearer {tokens[2]}"}
 
     mine = (await client.get(f"/v1/groups/{gid}/constraint", headers=headers)).json()
@@ -303,14 +303,38 @@ async def test_submitting_a_constraint_requires_a_guest_token(client, venues):
     assert r.status_code == 401
 
 
-async def test_an_invite_link_works_once(client, venues):
+async def test_an_invite_link_can_be_reopened_until_its_member_has_answered(client, venues):
+    """The in-app browser, the link preview and the organiser's own test must not spend it."""
     group = await create_group(client)
     token = group["invites"][0]["link"].split("t=")[1]
 
-    assert (await client.post("/v1/auth/group/exchange",
-                              json={"token": token})).status_code == 200
+    for _ in range(3):
+        r = await client.post("/v1/auth/group/exchange", json={"token": token})
+        assert r.status_code == 200, r.text
+        assert r.json()["slot"] == group["invites"][0]["slot"]
+
+
+async def test_an_invite_link_is_spent_once_its_member_has_answered(client, venues):
+    group = await create_group(client)
+    token = group["invites"][0]["link"].split("t=")[1]
+
+    first = await client.post("/v1/auth/group/exchange", json={"token": token})
+    assert first.status_code == 200
+    answered = await client.post(
+        f"/v1/groups/{group['group_id']}/constraint",
+        json={"budget_pkr": 2000},
+        headers={"Authorization": f"Bearer {first.json()['access_token']}"},
+    )
+    assert answered.status_code == 201, answered.text
+
+    # A link found later in a chat history can no longer reach that slot.
     assert (await client.post("/v1/auth/group/exchange",
                               json={"token": token})).status_code == 400
+
+
+async def test_an_unknown_invite_is_refused(client, venues):
+    r = await client.post("/v1/auth/group/exchange", json={"token": "hzg_not-a-real-token"})
+    assert r.status_code == 400
 
 
 # --- the objective -----------------------------------------------------------
