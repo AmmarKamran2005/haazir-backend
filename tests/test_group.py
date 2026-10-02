@@ -337,6 +337,50 @@ async def test_an_unknown_invite_is_refused(client, venues):
     assert r.status_code == 400
 
 
+async def test_a_member_can_join_by_picking_their_name(client, venues):
+    """The group link plus a name is enough; no per-person invite is needed."""
+    group = await create_group(client)
+    gid = group["group_id"]
+
+    joined = await client.post(f"/v1/groups/{gid}/join", json={"slot": 2})
+    assert joined.status_code == 200, joined.text
+    assert joined.json()["slot"] == 2
+    assert joined.json()["name"] == SIX[1]["name"]
+
+    r = await client.post(
+        f"/v1/groups/{gid}/constraint",
+        json={"budget_pkr": 1800},
+        headers={"Authorization": f"Bearer {joined.json()['access_token']}"},
+    )
+    assert r.status_code == 201, r.text
+    status_ = (await client.get(f"/v1/groups/{gid}")).json()
+    assert [m["responded"] for m in status_["members"]][:2] == [False, True]
+
+
+async def test_joining_twice_before_answering_is_fine(client, venues):
+    group = await create_group(client)
+    for _ in range(2):
+        r = await client.post(f"/v1/groups/{group['group_id']}/join", json={"slot": 1})
+        assert r.status_code == 200, r.text
+
+
+async def test_a_slot_that_has_answered_cannot_be_joined_from_elsewhere(client, venues):
+    """Joining it would hand out a token that can read that answer back."""
+    group = await create_group(client)
+    gid = group["group_id"]
+    await submit_all(client, group, SIX[:1])
+
+    r = await client.post(f"/v1/groups/{gid}/join", json={"slot": 1})
+    assert r.status_code == 409
+    assert SIX[0]["name"] in r.json()["detail"]
+
+
+async def test_joining_a_slot_that_does_not_exist_is_a_404(client, venues):
+    group = await create_group(client)
+    r = await client.post(f"/v1/groups/{group['group_id']}/join", json={"slot": 12})
+    assert r.status_code == 404
+
+
 # --- the objective -----------------------------------------------------------
 
 

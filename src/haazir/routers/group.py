@@ -26,6 +26,7 @@ from sqlalchemy import text
 
 from ..auth import group as group_auth
 from ..auth.deps import Ctx, CurrentGuest
+from ..auth.jwt import issue_guest
 from ..config import settings
 from ..db import solver_session
 from ..estimator import group as solver
@@ -178,6 +179,59 @@ async def group_status(group_id: uuid.UUID, ctx: Ctx) -> dict:
             for m in members
         ],
         "solvable": responded >= 2,
+    }
+
+
+class JoinIn(BaseModel):
+    slot: int = Field(ge=1, le=MAX_MEMBERS)
+
+
+@router.post("/{group_id}/join")
+async def join_group(group_id: uuid.UUID, body: JoinIn, ctx: Ctx) -> dict:
+    """Open the group link, tap your own name, answer. No per-person link to lose.
+
+    Per-person invite links were the original design and they failed in practice: a link
+    opened twice (in a chat app's browser, then the phone's) was spent, and the organiser had
+    no way back into their own group. One group link and a name picker is what people expect.
+
+    What stays private is the answer, not the act of joining. A slot that has already answered
+    cannot be joined again from another device, because the guest token for it could read that
+    answer back; the person who answered keeps their own token in the browser they used and
+    can edit from there.
+    """
+    row = (
+        await ctx.session.execute(
+            text(
+                """
+                SELECT m.id, m.display_name, (m.responded_at IS NOT NULL) AS responded,
+                       (g.expires_at > now()) AS live
+                  FROM group_member m JOIN group_session g ON g.id = m.group_id
+                 WHERE m.group_id = :g AND m.slot = :slot
+                """
+            ),
+            {"g": group_id, "slot": body.slot},
+        )
+    ).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="That person is not in this group.")
+    if not row["live"]:
+        raise HTTPException(status_code=status.HTTP_410_GONE,
+                            detail="This group has expired. Create a new one.")
+    if row["responded"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{row['display_name']} has already answered. They can change it from "
+                   "the phone they answered on.",
+        )
+
+    return {
+        "access_token": issue_guest(group_id, body.slot, row["id"]),
+        "token_type": "bearer",
+        "expires_in": settings.jwt_guest_ttl,
+        "group_id": str(group_id),
+        "slot": body.slot,
+        "name": row["display_name"],
     }
 
 
