@@ -442,3 +442,34 @@ async def test_the_model_cannot_invent_an_area(monkeypatch):
     assert out["area_id"] is None, "an area outside the catalogue must not become a filter"
     assert out["cuisine"] is None, "a cuisine outside the closed list must be dropped"
     assert out["dish"] == "nihari", "a free-text dish is allowed through"
+
+
+# --- a venue named in the query ----------------------------------------------
+
+
+async def test_a_named_venue_comes_first_even_when_its_name_has_a_dish_in_it(client):
+    """"zahid nihari" means Zahid Nihari, not any nihari place."""
+    async with service_session() as s:
+        await ingest.load_venues(s, [
+            venue("n1", "Javed Nihari", google_review_count=9000),
+            venue("n2", "Burns Road Nihari House", google_review_count=8000),
+            venue("n3", "Zahid Nihari", google_review_count=50),
+            venue("n4", "Karachi Kabab"),
+        ])
+    r = await client.post("/v1/search", json={"text": "zahid nihari", "party": 2})
+    assert r.status_code == 200, r.text
+    first = r.json()["results"][0]
+    assert first["name"] == "Zahid Nihari"
+    assert first["matched_name"] is True
+    assert first["why"].startswith("Matches the name you typed.")
+
+
+async def test_a_word_in_many_names_does_not_count_as_a_name(client):
+    """A dish search stays a dish search: "nihari" names no one venue."""
+    async with service_session() as s:
+        await ingest.load_venues(
+            s, [venue(f"m{i}", f"Nihari Point {i}") for i in range(14)]
+        )
+    r = await client.post("/v1/search", json={"text": "nihari", "party": 2})
+    assert r.status_code == 200, r.text
+    assert not any(row["matched_name"] for row in r.json()["results"])

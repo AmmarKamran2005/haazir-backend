@@ -80,6 +80,9 @@ class Query:
     # statement about the destination, and without this it did nothing at all: the ranking
     # was distance from a default origin, so the answer came back full of Saddar.
     area_id: int | None = None
+    # Exactly these venues. Used when the diner typed a venue's name: "zahid nihari" means
+    # Zahid Nihari, and the dish word in it must not turn it into "any nihari place".
+    venue_ids: list[str] | None = None
 
 
 @dataclass(slots=True)
@@ -169,6 +172,10 @@ def hard_filter_sql(q: Query, params: dict) -> list[str]:
     if q.area_id is not None:
         where.append("v.area_id = :area_id")
         params["area_id"] = q.area_id
+
+    if q.venue_ids:
+        where.append("v.id::text = ANY(:venue_ids)")
+        params["venue_ids"] = list(q.venue_ids)
 
     if q.budget:
         # NULL avg_ticket is not silently dropped: a venue whose price nobody knows is still

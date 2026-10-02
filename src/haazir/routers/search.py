@@ -23,8 +23,8 @@ from sqlalchemy import text
 
 from ..auth.deps import Ctx
 from ..estimator import fusion, queueing
-from ..estimator.scoring import WEIGHTS, Query, search_with_relaxation
-from ..services import llm, locate, lookup
+from ..estimator.scoring import WEIGHTS, Query, search as score_venues, search_with_relaxation
+from ..services import llm, locate, lookup, names
 from ..services.clock import HOUR_OF_WEEK_SQL
 
 router = APIRouter(prefix="/v1", tags=["search"])
@@ -81,6 +81,22 @@ async def search(body: SearchIn, ctx: Ctx) -> dict:
 
     result = await search_with_relaxation(ctx.session, q)
 
+    # A venue the diner named comes first, whatever the dish or area words in the query
+    # filtered for. Scored the same way as everything else, so its card carries the same
+    # live state and factors; only its place in the list is decided by the name.
+    named_ids = await names.venues_named_in(ctx.session, body.text)
+    named = []
+    if named_ids:
+        found = await score_venues(ctx.session, Query(
+            from_lat=body.from_lat, from_lng=body.from_lng, party=body.party,
+            limit=len(named_ids), city=body.city, venue_ids=named_ids, max_travel=120,
+        ))
+        order = {vid: i for i, vid in enumerate(named_ids)}
+        named = sorted(found["results"], key=lambda s: order.get(str(s.venue_id), 99))
+    named_set = {str(s.venue_id) for s in named}
+    merged = named + [s for s in result["results"] if str(s.venue_id) not in named_set]
+    result["results"] = merged[: q.limit]
+
     # Every row explains itself, from the score's own terms. This is `llm.explain`, which is
     # pure Python and makes no network call — /v1/search stays a fast, deterministic endpoint
     # and no caller has to ask separately why something ranked where it did. /v1/ask is where
@@ -90,6 +106,9 @@ async def search(body: SearchIn, ctx: Ctx) -> dict:
         row = scored.as_dict()
         row["why"] = llm.explain(row, party=q.party)
         row["why_source"] = "template"
+        row["matched_name"] = str(scored.venue_id) in named_set
+        if row["matched_name"]:
+            row["why"] = "Matches the name you typed. " + row["why"]
         rows.append(row)
 
     return {

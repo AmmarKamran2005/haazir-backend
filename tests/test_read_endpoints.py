@@ -79,6 +79,20 @@ async def test_a_card_carries_the_area_and_the_attribute_confidence(client, seed
     assert body["phone"] == "+922135870000"
 
 
+async def test_a_venue_is_found_by_its_name(client, seeded):
+    """The staff picker needs *this* restaurant, not any restaurant of its cuisine."""
+    r = await client.get("/v1/venues", params={"q": "quiet"})
+    assert r.status_code == 200
+    names = [v["name"] for v in r.json()["results"]]
+    assert names[0] == "Quiet Cafe"
+    assert r.json()["results"][0]["area"] == "Clifton"
+
+
+async def test_a_misspelt_name_still_finds_the_venue(client, seeded):
+    r = await client.get("/v1/venues", params={"q": "quite cafe"})
+    assert "Quiet Cafe" in [v["name"] for v in r.json()["results"]]
+
+
 async def test_an_occupancy_with_no_observations_is_labelled_a_prior(client, seeded):
     """The card still shows a number, because "we have no idea" is a worse answer than a
     baseline. It says which it is, and its confidence is capped below anything measured."""

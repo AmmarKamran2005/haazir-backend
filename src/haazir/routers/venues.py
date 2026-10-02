@@ -136,6 +136,46 @@ def _card(row) -> VenueCard:
     )
 
 
+@router.get("")
+async def find_by_name(
+    ctx: Ctx,
+    q: str = Query(min_length=2, max_length=80, description="part of a venue's name"),
+    limit: int = Query(default=8, ge=1, le=20),
+) -> dict:
+    """Venues whose name matches, for pickers that need *this* restaurant.
+
+    `/search` answers "where should I eat" and reads a query for area and cuisine, so
+    "naseeb biryani" there means any biryani place. Enrolling a staff tablet needs the opposite:
+    the one venue with that name. Substring first, then trigram similarity for typos; the GIN
+    trigram index on `venue.name` serves both.
+    """
+    rows = (
+        await ctx.session.execute(
+            text(
+                """
+                SELECT v.id, v.slug, v.name, a.name AS area
+                  FROM venue v LEFT JOIN area a ON a.id = v.area_id
+                 WHERE v.status = 'active'
+                   AND (v.name ILIKE :like OR similarity(v.name, :q) > 0.25)
+                 ORDER BY (v.name ILIKE :prefix) DESC,
+                          (v.name ILIKE :like) DESC,
+                          similarity(v.name, :q) DESC,
+                          v.google_review_count DESC NULLS LAST
+                 LIMIT :limit
+                """
+            ),
+            {"q": q, "like": f"%{q}%", "prefix": f"{q}%", "limit": limit},
+        )
+    ).mappings().all()
+    return {
+        "q": q,
+        "results": [
+            {"id": str(r["id"]), "slug": r["slug"], "name": r["name"], "area": r["area"]}
+            for r in rows
+        ],
+    }
+
+
 @router.get("/{ident}", response_model=VenueCard)
 async def venue_card(ident: str, ctx: Ctx) -> VenueCard:
     """By UUID or slug. RLS hides `status = 'hidden'` without this endpoint asking."""
