@@ -156,7 +156,11 @@ def build_attributes(raw: dict | None, scraped_at: str | None) -> dict:
     for key, value in raw.items():
         if value is None:  # unknown is an absent key, never a recorded "no"
             continue
-        out[key] = {"v": value, "c": ATTR_CONFIDENCE, "n": 0, "at": at, "src": "places_api"}
+        # `c0` is the confidence at `at`; `c` is what the nightly decay has made of it.
+        out[key] = {
+            "v": value, "c": ATTR_CONFIDENCE, "c0": ATTR_CONFIDENCE, "n": 0, "at": at,
+            "src": "places_api",
+        }
     return out
 
 

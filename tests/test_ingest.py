@@ -84,7 +84,7 @@ async def test_attributes_carry_confidence_not_a_bare_boolean(clean_db):
             text("SELECT attributes FROM venue WHERE place_id = 'test-place-1'")
         )
     assert attrs["dine_in"] == {
-        "v": True, "c": 0.75, "n": 0, "at": "2026-09-03", "src": "places_api",
+        "v": True, "c": 0.75, "c0": 0.75, "n": 0, "at": "2026-09-03", "src": "places_api",
     }
     assert attrs["wifi"]["v"] is False
 

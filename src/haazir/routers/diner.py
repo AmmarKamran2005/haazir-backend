@@ -310,6 +310,7 @@ async def _fold_fact_into_attributes(session, venue_id: uuid.UUID, fact_key: str
     fact = {
         "v": json.loads(winner_json),
         "c": confidence,
+        "c0": confidence,  # the base the nightly decay works from; see recompute.decay_facts
         "n": n,
         "at": dt.date.today().isoformat(),
         "src": "diner_verified",

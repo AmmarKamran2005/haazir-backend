@@ -207,10 +207,21 @@ async def refresh_live_state(
 async def decay_facts(session: AsyncSession) -> int:
     """Nightly. A fact nobody re-confirms loses weight. §3.4.
 
-    `c := c * exp(-days_since_verified / 180)`, floored at 0.25. The floor matters: a fact
+    `c := c0 * exp(-days_since_verified / 180)`, floored at 0.25. The floor matters: a fact
     should fade toward "we are no longer sure" and never to zero, because a decayed
     observation is still evidence and dropping it entirely would throw away the only thing
     anyone ever told us about that venue.
+
+    **The decay is a function of age, so it is computed from the confidence the fact was
+    verified at (`c0`), never from the already-decayed `c`.** The first version multiplied the
+    current `c` every night while `at` stayed put, which compounds: night d applied
+    `exp(-d/180)` on top of every earlier night's, so a 0.75 fact fell below the 0.5 hard-filter
+    floor after about twelve nights instead of about seventy-three, and the access filters
+    (`needs_card`, `needs_ramp`) silently returned nothing. `c0` makes the job idempotent: run
+    it twice in a night, or a hundred times, and the answer is the same.
+
+    A fact that predates `c0` takes its current `c` as the base the first time it is seen.
+    The floor never raises a fact: one recorded below it stays where it was.
     """
     result = await session.execute(
         text(
@@ -219,9 +230,14 @@ async def decay_facts(session: AsyncSession) -> int:
                 SELECT jsonb_object_agg(
                     key,
                     CASE WHEN value ? 'at' AND value ? 'c'
-                         THEN value || jsonb_build_object('c', GREATEST(0.25,
-                              (value->>'c')::float *
-                              exp(-GREATEST(0, (CURRENT_DATE - (value->>'at')::date)) / 180.0)))
+                         THEN value || jsonb_build_object(
+                              'c0', COALESCE((value->>'c0')::float, (value->>'c')::float),
+                              'c', LEAST(
+                                  COALESCE((value->>'c0')::float, (value->>'c')::float),
+                                  GREATEST(0.25,
+                                      COALESCE((value->>'c0')::float, (value->>'c')::float) *
+                                      exp(-GREATEST(0, (CURRENT_DATE - (value->>'at')::date))
+                                          / 180.0))))
                          ELSE value END)
                   FROM jsonb_each(attributes)
             )
