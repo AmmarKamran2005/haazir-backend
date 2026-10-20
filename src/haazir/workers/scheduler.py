@@ -51,6 +51,12 @@ async def _recompute_trust() -> None:
     log.info("recomputed trust for %d venues", n)
 
 
+async def _learn_priors() -> None:
+    async with service_session() as session:
+        n = await recompute.learn_priors(session)
+    log.info("learned %d hour-of-week priors from camera and staff readings", n)
+
+
 async def _purge() -> None:
     """Expired magic links and spent group invites. §11."""
     from ..auth import group as group_auth
@@ -85,6 +91,7 @@ def build() -> AsyncIOScheduler:
 
     scheduler.add_job(_decay_facts, CronTrigger(hour=3, minute=10), id="decay_facts")
     scheduler.add_job(_recompute_trust, CronTrigger(hour=3, minute=30), id="recompute_trust")
+    scheduler.add_job(_learn_priors, CronTrigger(hour=3, minute=45), id="learn_priors")
     scheduler.add_job(_purge, CronTrigger(hour=4, minute=0), id="purge")
     scheduler.add_job(
         _create_partitions, CronTrigger(day=1, hour=2, minute=0), id="create_partitions"

@@ -81,3 +81,14 @@ async def revoke_device(device_id: uuid.UUID, principal: CurrentAdmin, ctx: Ctx)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="no such device, or already revoked"
         )
+
+
+@router.post("/jobs/learn-priors")
+async def run_learn_priors(principal: CurrentAdmin) -> dict:
+    """The nightly learning job, on demand. Idempotent, so running it early is harmless."""
+    from ..db import service_session
+    from ..services import recompute
+
+    async with service_session() as session:
+        n = await recompute.learn_priors(session)
+    return {"updated_hours": n}

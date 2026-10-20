@@ -263,6 +263,68 @@ async def recompute_trust(session: AsyncSession, limit: int = 2000) -> int:
     return len(venue_ids)
 
 
+# How far back the learning job reads, and how many observed days it takes before what was
+# seen outweighs the original prior. Capped, so a venue never forgets its usual week entirely.
+LEARN_WINDOW_DAYS = 42
+LEARN_HALF_DAYS = 3.0
+LEARN_MAX_WEIGHT = 0.8
+
+
+async def learn_priors(session: AsyncSession) -> int:
+    """Nightly. "The AI learns your Friday 9 pm." §4 B9.
+
+    For each venue and hour of the week with camera or in-fence staff readings, the prior
+    becomes `base * (1 - w) + observed * w`, where `observed` is the mean of daily means (so a
+    camera's 700 readings in an hour count as one evening, the same as one staff tap) and
+    `w = days / (days + 3)`, capped at 0.8. Computed from `base_ratio`, never from the current
+    value, so it is idempotent. Returns how many hour-of-week rows moved.
+    """
+    await session.execute(
+        text(
+            "UPDATE occupancy_prior SET base_ratio = mean_ratio, base_sigma = sigma, "
+            "       base_source = source "
+            " WHERE base_ratio IS NULL"
+        )
+    )
+    result = await session.execute(
+        text(
+            """
+            WITH readings AS (
+                SELECT o.venue_id,
+                       (EXTRACT(DOW FROM o.observed_at AT TIME ZONE 'Asia/Karachi')::int * 24
+                        + EXTRACT(HOUR FROM o.observed_at AT TIME ZONE 'Asia/Karachi')::int)
+                           AS how,
+                       (o.observed_at AT TIME ZONE 'Asia/Karachi')::date AS day,
+                       avg(o.value) AS day_mean
+                  FROM observation o
+                 WHERE o.source IN ('camera', 'staff')
+                   AND (o.source = 'camera' OR o.geo_ok)
+                   AND o.observed_at > now() - make_interval(days => CAST(:window AS int))
+                 GROUP BY 1, 2, 3
+            ),
+            learned AS (
+                SELECT venue_id, how, avg(day_mean) AS observed, count(*) AS days
+                  FROM readings GROUP BY 1, 2
+            )
+            UPDATE occupancy_prior p
+               SET mean_ratio = GREATEST(0.0, LEAST(1.0,
+                       p.base_ratio * (1 - w.weight) + l.observed * w.weight)),
+                   sigma = GREATEST(0.06, p.base_sigma * (1 - w.weight / 2)),
+                   source = 'learned',
+                   learned_days = l.days,
+                   learned_at = now()
+              FROM learned l,
+                   LATERAL (SELECT LEAST(CAST(:max_w AS float8),
+                                       l.days::float8 / (l.days + CAST(:half AS float8)))
+                               AS weight) w
+             WHERE p.venue_id = l.venue_id AND p.hour_of_week = l.how
+            """
+        ),
+        {"window": LEARN_WINDOW_DAYS, "half": LEARN_HALF_DAYS, "max_w": LEARN_MAX_WEIGHT},
+    )
+    return result.rowcount or 0
+
+
 async def create_next_partition(session: AsyncSession) -> str:
     """Monthly. An insert with no matching partition raises, and the insert path is the staff
     console during a live demo."""

@@ -94,7 +94,9 @@ async def _prior_occupancy(ctx: Ctx, venue_id: uuid.UUID) -> OccupancySummary | 
         # claims to draw was not actually there.
         confidence=round(max(0.02, min(PRIOR_CONFIDENCE_CAP, 1.0 - sd / SIGMA_REF)), 3),
         band=band,
-        source="prior" if row["source"] == "google_popular_times" else "archetype",
+        # A learned prior is this venue's own measured week, so it is a prior, not an
+        # archetype.
+        source="prior" if row["source"] in ("google_popular_times", "learned") else "archetype",
     )
 
 
