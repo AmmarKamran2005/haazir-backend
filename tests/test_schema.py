@@ -27,7 +27,7 @@ async def test_every_mapped_table_exists_in_the_database():
     assert missing == [], f"mapped but not migrated: {missing}"
 
 
-async def test_the_schema_has_the_thirty_tables_the_plan_describes():
+async def test_the_schema_has_the_tables_the_plan_describes():
     async with service_session() as s:
         rows = await s.execute(
             text(
@@ -37,7 +37,9 @@ async def test_the_schema_has_the_thirty_tables_the_plan_describes():
             )
         )
         present = {r[0] for r in rows}
-    assert len(present) == 30, sorted(present)
+    # Thirty from the original plan, plus camera, card_deal and venue_claim for the finale.
+    assert len(present) == 33, sorted(present)
+    assert {"camera", "card_deal", "venue_claim"} <= present
 
 
 async def test_postgis_and_pgvector_are_installed_and_usable():

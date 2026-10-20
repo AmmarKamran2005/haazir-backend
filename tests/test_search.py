@@ -430,7 +430,7 @@ async def test_the_model_cannot_invent_an_area(monkeypatch):
     from haazir.db import service_session
     from haazir.services import llm, locate
 
-    async def fake_call(model, system, prompt, max_tokens=160):
+    async def fake_call(model, system, prompt, max_tokens=160, timeout=None):
         return '{"area": "Gulshan-e-Maymar", "cuisine": "Klingon", "dish": "nihari"}'
 
     monkeypatch.setattr(llm, "_call", fake_call)
