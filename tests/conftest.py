@@ -102,6 +102,7 @@ WIPE = [
     "group_session",
     "camera",
     "card_deal",
+    "venue_claim",
     "device_token",
     "refresh_token",
     "magic_link",

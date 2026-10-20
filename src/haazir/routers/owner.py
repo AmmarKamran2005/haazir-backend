@@ -17,11 +17,14 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
+from ..auth import device as device_auth
 from ..auth.deps import Ctx, CurrentUser
+from ..config import settings
+from ..schemas.auth import DeviceIssueIn, DeviceIssueOut
 from ..services.clock import HOUR_OF_WEEK_SQL
 
 router = APIRouter(prefix="/v1/owner", tags=["owner"])
@@ -377,3 +380,61 @@ async def attribution(venue_id: uuid.UUID, principal: CurrentUser, ctx: Ctx) -> 
             "folded into the referral count."
         ),
     }
+
+
+# --- staff devices, issued by the venue's own owner (B3) ----------------------
+
+
+@router.post("/venues/{venue_id}/devices", status_code=status.HTTP_201_CREATED)
+async def issue_device(
+    venue_id: uuid.UUID, body: DeviceIssueIn, principal: CurrentUser, ctx: Ctx
+) -> DeviceIssueOut:
+    """The admin flow in `routers/admin.py`, scoped to a venue this owner holds."""
+    from .camera import _manageable
+
+    await _manageable(ctx, venue_id, principal)
+    token, device_id = await device_auth.issue(
+        ctx.session, venue_id, label=body.label, geofence_m=body.geofence_m,
+        created_by=principal.subject,
+    )
+    return DeviceIssueOut(
+        device_id=device_id, venue_id=venue_id, token=token,
+        setup_url=f"{settings.web_base_url.rstrip('/')}/staff/setup?t={token}",
+        geofence_m=body.geofence_m, expires_in=settings.jwt_device_ttl,
+    )
+
+
+@router.get("/venues/{venue_id}/devices")
+async def list_devices(venue_id: uuid.UUID, principal: CurrentUser, ctx: Ctx) -> list[dict]:
+    from .camera import _manageable
+
+    await _manageable(ctx, venue_id, principal)
+    rows = (
+        await ctx.session.execute(
+            text(
+                "SELECT id, label, geofence_m, created_at, expires_at, last_used_at, revoked_at "
+                "  FROM device_token WHERE venue_id = :v ORDER BY created_at DESC"
+            ),
+            {"v": venue_id},
+        )
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+@router.delete("/venues/{venue_id}/devices/{device_id}",
+               status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_device(
+    venue_id: uuid.UUID, device_id: uuid.UUID, principal: CurrentUser, ctx: Ctx
+) -> Response:
+    from .camera import _manageable
+
+    await _manageable(ctx, venue_id, principal)
+    result = await ctx.session.execute(
+        text("UPDATE device_token SET revoked_at = now() "
+             " WHERE id = :d AND venue_id = :v AND revoked_at IS NULL"),
+        {"d": device_id, "v": venue_id},
+    )
+    if not result.rowcount:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="no such device, or already revoked")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
