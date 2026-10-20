@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import ANON, SessionLocal, apply_claims
 from . import device as device_auth
 from .jwt import AuthError, Principal, decode
-from .tokens import DEVICE_PREFIX
+from .tokens import CAMERA_PREFIX, DEVICE_PREFIX
 
 UNAUTHORIZED = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -88,6 +88,11 @@ def client_ip(request: Request) -> str | None:
 async def _resolve(request: Request, session: AsyncSession) -> Principal | None:
     credential = bearer(request)
     if not credential:
+        return None
+
+    # A camera token is resolved by its own dependency (auth/camera.py) and never becomes a
+    # principal, so the request's claims stay anonymous.
+    if credential.startswith(CAMERA_PREFIX):
         return None
 
     # Device tokens are opaque and database-backed; access tokens are signed JWTs. The prefix

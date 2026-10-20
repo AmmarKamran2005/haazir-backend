@@ -40,6 +40,11 @@ SOURCES: dict[str, dict] = {
                 "sub": "GPS + dwell verified"},
     "pos": {"sigma": 0.060, "tau": 30.0, "label": "POS integration",
             "sub": "Point-of-sale covers"},
+    # Counts from an on-device detector, every few seconds. The sharpest source in the
+    # model and the quickest to go stale: a reading from ten minutes ago describes a room
+    # that has since turned over, and a camera that stops sending should fade fast.
+    "camera": {"sigma": 0.050, "tau": 10.0, "label": "AI camera",
+               "sub": "On-device table detection"},
     "prior": {"sigma": 0.215, "tau": None, "label": "Historical prior",
               "sub": "Same hour-of-week"},
 }

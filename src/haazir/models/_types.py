@@ -25,7 +25,7 @@ VenueTier = pg_enum("venue_tier", "seeded", "claimed", "live")
 VenueStatus = pg_enum(
     "venue_status", "active", "temporarily_closed", "permanently_closed", "hidden"
 )
-ObsSource = pg_enum("obs_source", "staff", "checkin", "payment", "prior", "pos")
+ObsSource = pg_enum("obs_source", "staff", "checkin", "payment", "prior", "pos", "camera")
 RegEventType = pg_enum("reg_event_type", "sealed", "fined", "notice", "cleared", "reopened")
 OfferStatus = pg_enum("offer_status", "draft", "live", "paused", "expired")
 PriceUnit = pg_enum(

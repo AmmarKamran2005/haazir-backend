@@ -100,6 +100,7 @@ WIPE = [
     "group_member",
     "group_token",
     "group_session",
+    "camera",
     "device_token",
     "refresh_token",
     "magic_link",

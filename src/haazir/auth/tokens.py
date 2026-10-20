@@ -24,6 +24,7 @@ import secrets
 MAGIC_PREFIX = "hzm_"
 REFRESH_PREFIX = "hzr_"
 DEVICE_PREFIX = "hzd_"
+CAMERA_PREFIX = "hzc_"
 
 _ENTROPY_BYTES = 32
 

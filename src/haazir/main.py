@@ -23,6 +23,7 @@ from .routers import (
     admin,
     ask,
     auth,
+    camera,
     city,
     diner,
     dishes,
@@ -109,7 +110,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_list,
     allow_credentials=True,  # the refresh cookie needs this
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Last-Event-ID"],
     max_age=600,
 )
@@ -137,3 +138,6 @@ app.include_router(diner.router)
 app.include_router(group.router)
 app.include_router(ask.router)
 app.include_router(owner.router)
+app.include_router(camera.owner_router)
+app.include_router(camera.router)
+app.include_router(camera.public_router)
