@@ -11,6 +11,7 @@ none, because the stage script asks for one.
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import json
 import pathlib
 import sys
@@ -63,7 +64,7 @@ async def main(data: dict | list) -> None:
                                            discount_pct, max_discount_pkr, days_of_week,
                                            valid_until, terms, is_demo)
                     VALUES (:ext, :bank, :tier, :v, :chain, :pct, :cap, :days,
-                            CAST(:until AS date), :terms, :demo)
+                            :until, :terms, :demo)
                     ON CONFLICT (ext_id) DO UPDATE SET
                         bank = EXCLUDED.bank, card_tier = EXCLUDED.card_tier,
                         venue_id = EXCLUDED.venue_id, chain_name = EXCLUDED.chain_name,
@@ -79,7 +80,7 @@ async def main(data: dict | list) -> None:
                     "v": venue_id, "chain": r.get("chain_name"),
                     "pct": int(r["discount_pct"]), "cap": r.get("max_discount_pkr"),
                     "days": r.get("days_of_week") or [1, 2, 3, 4, 5, 6, 7],
-                    "until": r.get("valid_until"), "terms": r.get("terms"),
+                    "until": dt.date.fromisoformat(r["valid_until"]) if r.get("valid_until") else None, "terms": r.get("terms"),
                     "demo": bool(r.get("is_demo", True)),
                 },
             )

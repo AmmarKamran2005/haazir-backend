@@ -33,7 +33,7 @@ from sqlalchemy import text
 from ..auth import camera as camera_auth
 from ..auth import ratelimit
 from ..auth.camera import CurrentCamera
-from ..auth.deps import Ctx, CurrentUser
+from ..auth.deps import Ctx, CurrentAdmin, CurrentUser
 from ..config import settings
 from ..db import service_session
 from ..services import lookup, realtime
@@ -42,6 +42,7 @@ from .staff import _refresh_and_publish
 owner_router = APIRouter(prefix="/v1/owner", tags=["camera"])
 router = APIRouter(prefix="/v1/camera", tags=["camera"])
 public_router = APIRouter(prefix="/v1/venues", tags=["camera"])
+admin_router = APIRouter(prefix="/v1/admin", tags=["camera"])
 
 # A camera is the sharpest source in the model; the trust is just short of a staff tap inside
 # the geofence because a detector can be fooled by a coat on a chair.
@@ -224,44 +225,118 @@ async def add_camera(
     return CameraIssued(camera_id=camera_id, token=token)
 
 
+CAMERA_ITEM_SQL = """
+    SELECT c.id, c.venue_id, v.name AS venue_name, c.name, c.kind, c.last_seen,
+           c.tables_total, c.tables_occupied, c.people, c.fps, c.snapshot_at, c.created_at,
+           c.frame_w, c.frame_h, c.zones
+      FROM camera c JOIN venue v ON v.id = c.venue_id
+     WHERE c.revoked_at IS NULL
+"""
+
+
+def _camera_item(r, now: dt.datetime, *, with_venue: bool = False) -> dict:
+    item = {
+        "camera_id": str(r["id"]),
+        "name": r["name"],
+        "kind": r["kind"],
+        "status": (
+            "online"
+            if r["last_seen"] and (now - r["last_seen"]).total_seconds() <= ONLINE_WITHIN_S
+            else "offline"
+        ),
+        "last_seen": r["last_seen"],
+        "tables_total": r["tables_total"] or 0,
+        "tables_occupied": r["tables_occupied"] or 0,
+        "people": r["people"] or 0,
+        "fps": r["fps"],
+        "snapshot_url": snapshot_url(r["id"]) if r["snapshot_at"] else None,
+        "snapshot_at": r["snapshot_at"],
+        # The owner page draws the zones over the snapshot, in the frame they were drawn in.
+        "frame_w": r["frame_w"],
+        "frame_h": r["frame_h"],
+        "zones": _zones(r["zones"]),
+    }
+    if with_venue:
+        item |= {"venue_id": str(r["venue_id"]), "venue_name": r["venue_name"]}
+    return item
+
+
 @owner_router.get("/venues/{venue_id}/cameras")
 async def list_cameras(venue_id: uuid.UUID, principal: CurrentUser, ctx: Ctx) -> list[dict]:
     await _manageable(ctx, venue_id, principal)
     rows = (
         await ctx.session.execute(
-            text(
-                """
-                SELECT id, name, kind, last_seen, tables_total, tables_occupied, people, fps,
-                       snapshot_at, created_at
-                  FROM camera
-                 WHERE venue_id = :v AND revoked_at IS NULL
-                 ORDER BY created_at
-                """
-            ),
+            text(CAMERA_ITEM_SQL + " AND c.venue_id = :v ORDER BY c.created_at"),
             {"v": venue_id},
         )
     ).mappings().all()
     now = dt.datetime.now(dt.UTC)
-    return [
-        {
-            "camera_id": str(r["id"]),
-            "name": r["name"],
-            "kind": r["kind"],
-            "status": (
-                "online"
-                if r["last_seen"] and (now - r["last_seen"]).total_seconds() <= ONLINE_WITHIN_S
-                else "offline"
-            ),
-            "last_seen": r["last_seen"],
-            "tables_total": r["tables_total"] or 0,
-            "tables_occupied": r["tables_occupied"] or 0,
-            "people": r["people"] or 0,
-            "fps": r["fps"],
-            "snapshot_url": snapshot_url(r["id"]) if r["snapshot_at"] else None,
-            "snapshot_at": r["snapshot_at"],
-        }
-        for r in rows
-    ]
+    return [_camera_item(r, now) for r in rows]
+
+
+@admin_router.get("/cameras")
+async def all_cameras(principal: CurrentAdmin, ctx: Ctx) -> list[dict]:
+    """Camera health across every venue."""
+    rows = (
+        await ctx.session.execute(
+            text(CAMERA_ITEM_SQL + " ORDER BY c.last_seen DESC NULLS LAST LIMIT 500")
+        )
+    ).mappings().all()
+    now = dt.datetime.now(dt.UTC)
+    return [_camera_item(r, now, with_venue=True) for r in rows]
+
+
+@admin_router.get("/stats")
+async def system_stats(principal: CurrentAdmin, ctx: Ctx) -> dict:
+    """The admin panel's system health: coverage, cameras, recent readings, model spend."""
+    from ..db import service_session
+    from ..estimator.fusion import SOURCE_IS_LIVE_SQL
+    from ..services import llm
+
+    async with service_session() as s:
+        row = (
+            await s.execute(
+                text(
+                    f"""
+                    SELECT (SELECT count(*) FROM venue WHERE status = 'active') AS venues_total,
+                           (SELECT count(*) FROM live_state l WHERE {SOURCE_IS_LIVE_SQL})
+                               AS venues_live,
+                           (SELECT avg(occupancy) FROM live_state) AS utilisation_now,
+                           (SELECT count(*) FROM camera WHERE revoked_at IS NULL) AS cameras_total,
+                           (SELECT count(*) FROM camera WHERE revoked_at IS NULL
+                               AND last_seen > now() - make_interval(secs => :online))
+                               AS cameras_online,
+                           (SELECT count(*) FROM observation
+                             WHERE observed_at > now() - INTERVAL '24 hours'
+                               AND source <> 'prior') AS observations_24h
+                    """
+                ),
+                {"online": ONLINE_WITHIN_S},
+            )
+        ).mappings().one()
+        weights = (
+            await s.execute(
+                text(
+                    "SELECT k AS source, avg((l.source_weights->>k)::float) AS w "
+                    "  FROM live_state l, jsonb_object_keys(l.source_weights) k GROUP BY k"
+                )
+            )
+        ).mappings().all()
+    total = row["venues_total"] or 0
+    by_source = {w["source"]: round(float(w["w"]), 4) for w in weights}
+    return {
+        "venues_total": total,
+        "live_fraction": round((row["venues_live"] or 0) / total, 4) if total else 0.0,
+        "utilisation_now": round(float(row["utilisation_now"] or 0), 4),
+        "cameras_online": row["cameras_online"],
+        "cameras_total": row["cameras_total"],
+        "observations_24h": row["observations_24h"],
+        "llm": {k: v for k, v in llm.budget.as_dict().items()
+                if k in ("spent_usd", "ceiling_usd", "calls", "degraded")}
+               | {"available": llm.available()},
+        "source_weights": {k: by_source.get(k, 0.0)
+                           for k in ("camera", "staff", "checkin", "payment", "prior")},
+    }
 
 
 @owner_router.delete(
