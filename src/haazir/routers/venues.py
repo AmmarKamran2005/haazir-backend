@@ -195,6 +195,9 @@ async def venue_card(ident: str, ctx: Ctx) -> VenueCard:
     card = _card(row)
     if card.live is None:
         card.live = await _prior_occupancy(ctx, card.id)
+    from ..services import deals
+
+    card.deals = (await deals.for_venues(ctx.session, [card.id])).get(card.id, [])
     return card
 
 

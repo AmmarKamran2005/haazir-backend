@@ -48,6 +48,14 @@ class TrustComponent(BaseModel):
     note: str | None = None
 
 
+class CardDeal(BaseModel):
+    bank: str
+    discount_pct: int
+    cap: int | None = None
+    card_tier: str | None = None
+    today: bool = True
+
+
 class VenueCard(BaseModel):
     id: uuid.UUID
     slug: str
@@ -81,6 +89,7 @@ class VenueCard(BaseModel):
     trust_score: int | None = None
     trust_components: list[TrustComponent] | None = None
     live: OccupancySummary | None = None
+    deals: list[CardDeal] = Field(default_factory=list)
 
 
 class DishLine(BaseModel):
