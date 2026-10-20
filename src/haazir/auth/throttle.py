@@ -42,8 +42,13 @@ RULES: list[tuple[re.Pattern, int]] = [
     (re.compile(r"^/v1/(search|ask)$"), 60),
     # Auth. The magic-link endpoint also has a database-backed per-email and per-IP limit
     # (§5 rule 4); this is the cheap outer guard that stops a flood reaching it at all.
-    (re.compile(r"^/v1/auth/request-link$"), 12),
-    (re.compile(r"^/v1/auth/(verify|refresh)$"), 30),
+    (re.compile(r"^/v1/auth/(request-link|request-code)$"), 12),
+    # A wrong code also spends one of five tries on the code itself; this caps the rate.
+    (re.compile(r"^/v1/auth/verify-code$"), 10),
+    (re.compile(r"^/v1/auth/(verify|refresh|google|demo)$"), 30),
+    # The chat calls a model; Ghar asks for a long JSON plan.
+    (re.compile(r"^/v1/chat$"), 20),
+    (re.compile(r"^/v1/ghar/"), 10),
     # Writes that create rows somebody else has to look at.
     (re.compile(r"^/v1/groups$"), 10),
     (re.compile(r"^/v1/venues/[^/]+/facts$"), 20),

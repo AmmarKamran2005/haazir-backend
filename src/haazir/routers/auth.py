@@ -20,18 +20,26 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import text
 
+from ..auth import google as google_auth
 from ..auth import group as group_auth
 from ..auth import magic_link, ratelimit, refresh
 from ..auth.deps import Ctx, CurrentUser, client_ip
 from ..auth.jwt import issue_access
 from ..config import settings
 from ..schemas.auth import (
+    DemoIn,
+    GoogleIn,
     GroupExchangeIn,
     GroupTokenOut,
     MeOut,
+    RefreshIn,
+    RequestCodeIn,
+    RequestCodeOut,
     RequestLinkIn,
     RequestLinkOut,
     TokenOut,
+    UserOut,
+    VerifyCodeIn,
     VerifyIn,
 )
 
@@ -121,8 +129,13 @@ async def verify(body: VerifyIn, request: Request, response: Response, ctx: Ctx)
 
 
 @router.post("/refresh", response_model=TokenOut)
-async def refresh_tokens(request: Request, response: Response, ctx: Ctx) -> TokenOut:
-    presented = request.cookies.get(COOKIE_NAME)
+async def refresh_tokens(
+    request: Request, response: Response, ctx: Ctx, body: RefreshIn | None = None
+) -> TokenOut:
+    """Cookie for the web, unchanged. A body `{refresh_token}` for the app, which gets the
+    rotated token back in the body and no cookie."""
+    mobile = bool(body and body.refresh_token)
+    presented = body.refresh_token if mobile else request.cookies.get(COOKIE_NAME)
     if not presented:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="no session")
 
@@ -149,17 +162,151 @@ async def refresh_tokens(request: Request, response: Response, ctx: Ctx) -> Toke
             status_code=status.HTTP_401_UNAUTHORIZED, detail="session expired"
         ) from exc
 
-    email = await ctx.session.scalar(
-        text("SELECT email FROM app_user WHERE id = :uid"), {"uid": user_id}
-    )
-    _set_refresh_cookie(response, fresh)
+    user = await _user_out(ctx, user_id)
+    if not mobile:
+        _set_refresh_cookie(response, fresh)
     return TokenOut(
-        access_token=issue_access(user_id, role, email),
+        access_token=issue_access(user_id, role, user.email),
         expires_in=_access_ttl(role),
         role=role,
         user_id=user_id,
-        email=email,
+        email=user.email,
+        refresh_token=fresh if mobile else None,
+        user=user,
     )
+
+
+# --- mobile sign-in ------------------------------------------------------------
+
+
+async def _user_out(ctx: Ctx, user_id) -> UserOut:
+    row = (
+        await ctx.session.execute(
+            text("SELECT id, email, display_name, role, avatar_url FROM app_user WHERE id = :u"),
+            {"u": user_id},
+        )
+    ).mappings().one()
+    return UserOut(id=row["id"], email=row["email"], name=row["display_name"],
+                   role=row["role"], avatar_url=row["avatar_url"])
+
+
+async def _mobile_session(ctx: Ctx, request: Request, user_id, role: str) -> TokenOut:
+    """Access and refresh token in the body, for a client that stores them itself."""
+    token, _ = await refresh.issue(
+        ctx.session, user_id,
+        user_agent=request.headers.get("user-agent"), ip=client_ip(request),
+    )
+    user = await _user_out(ctx, user_id)
+    return TokenOut(
+        access_token=issue_access(user_id, role, user.email),
+        expires_in=_access_ttl(role),
+        role=role,
+        user_id=user_id,
+        email=user.email,
+        refresh_token=token,
+        user=user,
+    )
+
+
+@router.post("/request-code", response_model=RequestCodeOut)
+async def request_code(body: RequestCodeIn, request: Request, ctx: Ctx) -> RequestCodeOut:
+    """The app's sign-in: the same email as the magic link, read for its 6-digit code.
+
+    The same answer for every address, registered or not (§5 rule 8).
+    """
+    try:
+        code = await magic_link.request_code(ctx.session, str(body.email), client_ip(request))
+    except ratelimit.RateLimited as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many codes requested. Try again shortly.",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+    return RequestCodeOut(dev_code=None if settings.is_prod else code)
+
+
+@router.post("/verify-code", response_model=TokenOut)
+async def verify_code(body: VerifyCodeIn, request: Request, ctx: Ctx) -> TokenOut:
+    try:
+        user_id, _email, role = await magic_link.consume_code(
+            ctx.session, str(body.email), body.code
+        )
+    except magic_link.LinkInvalid as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That code is wrong or has expired. Request a new one.",
+        ) from exc
+    return await _mobile_session(ctx, request, user_id, role)
+
+
+@router.post("/google", response_model=TokenOut)
+async def google_sign_in(body: GoogleIn, request: Request, ctx: Ctx) -> TokenOut:
+    try:
+        who = await google_auth.verify(body.id_token)
+    except google_auth.GoogleInvalid as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Google sign-in failed."
+        ) from exc
+    try:
+        user_id, _email, role = await magic_link.upsert_user(
+            ctx.session, who.email, name=who.name, avatar_url=who.picture, google_sub=who.sub
+        )
+    except magic_link.LinkInvalid as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="This account is not active."
+        ) from exc
+    return await _mobile_session(ctx, request, user_id, role)
+
+
+DEMO_USERS = {
+    "diner": ("demo-diner@haazir.app", "Demo Diner"),
+    "owner": ("demo-owner@haazir.app", "Demo Owner"),
+}
+
+
+@router.post("/demo", response_model=TokenOut)
+async def demo_sign_in(body: DemoIn, request: Request, ctx: Ctx) -> TokenOut:
+    """One-tap accounts for the stage. A 404 unless `DEMO_LOGIN=1`.
+
+    The demo owner owns the hero venue, claimed here on first use, so the owner screens have
+    a real restaurant with a real camera behind them.
+    """
+    if not settings.demo_login:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if body.role == "admin":
+        email, name = settings.demo_admin_email, None
+    else:
+        email, name = DEMO_USERS[body.role]
+    user_id = await ctx.session.scalar(
+        text(
+            """
+            INSERT INTO app_user (email, email_verified, role, display_name, last_seen_at)
+            VALUES (:email, TRUE, CAST(:role AS user_role), :name, now())
+            ON CONFLICT (email) DO UPDATE
+               SET role = EXCLUDED.role, last_seen_at = now(),
+                   display_name = COALESCE(app_user.display_name, EXCLUDED.display_name)
+         RETURNING id
+            """
+        ),
+        {"email": email, "role": body.role, "name": name},
+    )
+    if body.role == "owner":
+        from ..db import service_session
+
+        # The protected-columns trigger lets only admin or service set `claimed_by`.
+        async with service_session() as s:
+            await s.execute(
+                text(
+                    """
+                    UPDATE venue SET claimed_by = :u, claimed_at = COALESCE(claimed_at, now()),
+                           tier = CASE WHEN tier = 'seeded' THEN 'claimed'::venue_tier
+                                       ELSE tier END
+                     WHERE slug = :slug AND (claimed_by IS NULL OR claimed_by = :u)
+                    """
+                ),
+                {"u": user_id, "slug": settings.demo_hero_venue},
+            )
+    return await _mobile_session(ctx, request, user_id, body.role)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

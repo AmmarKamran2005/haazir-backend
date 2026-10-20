@@ -58,10 +58,17 @@ async def send(to: str, subject: str, text_body: str, html_body: str | None = No
         return False
 
 
-def magic_link_email(link: str, minutes: int) -> tuple[str, str, str]:
-    subject = "Your HAAZIR sign-in link"
+def magic_link_email(link: str, minutes: int, code: str | None = None) -> tuple[str, str, str]:
+    subject = f"{code} is your HAAZIR code" if code else "Your HAAZIR sign-in link"
+    in_app = f"In the app, enter the code {code}.\n\nOr sign in on the web:\n\n" if code else ""
+    code_html = (
+        f'<p style="font-size:28px;letter-spacing:6px;font-weight:700">{code}</p>'
+        "<p>Enter this code in the app, or sign in on the web:</p>"
+        if code else ""
+    )
     text_body = (
         "Sign in to HAAZIR:\n\n"
+        f"{in_app}"
         f"{link}\n\n"
         f"This link works once and expires in {minutes} minutes.\n"
         "If you did not ask for it, ignore this email. Nothing has changed on your account.\n"
@@ -70,6 +77,10 @@ def magic_link_email(link: str, minutes: int) -> tuple[str, str, str]:
         '<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;'
         'font-size:15px;line-height:1.6;color:#14120D">'
         "<p>Sign in to HAAZIR:</p>"
+        f"{code_html}"
+        + (f'<p style="font-size:28px;letter-spacing:6px;font-weight:700">{code}</p>'
+           "<p>Enter this code in the app, or sign in on the web:</p>" if code else "")
+        +
         f'<p><a href="{link}" style="color:#A9530B">{link}</a></p>'
         f"<p>This link works once and expires in {minutes} minutes.</p>"
         "<p>If you did not ask for it, ignore this email. "

@@ -91,6 +91,14 @@ class Settings(BaseSettings):
 
     admin_emails: str = ""  # comma separated allowlist
 
+    # Google ID tokens are accepted only when their `aud` is one of these OAuth client ids
+    # (the web client the Android app names as `serverClientId`, plus any others).
+    google_client_ids: str = ""
+    # One-tap demo accounts for the stage. Off unless explicitly set, in every environment.
+    demo_login: bool = False
+    demo_hero_venue: str = "naseeb-biryani-gazb84"
+    demo_admin_email: str = "ammarkamran05@gmail.com"
+
     # ── rate limits (§5 rule 4) ───────────────────────────────────────────────
     rl_link_per_email: int = 3
     rl_link_per_email_window: int = 900
@@ -155,6 +163,10 @@ class Settings(BaseSettings):
     @property
     def admin_email_list(self) -> list[str]:
         return [e.strip().lower() for e in self.admin_emails.split(",") if e.strip()]
+
+    @property
+    def google_client_id_list(self) -> list[str]:
+        return [c.strip() for c in self.google_client_ids.split(",") if c.strip()]
 
     @property
     def sqlalchemy_url(self) -> str:

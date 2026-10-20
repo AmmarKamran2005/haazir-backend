@@ -28,6 +28,14 @@ class VerifyIn(BaseModel):
     token: str = Field(min_length=8, max_length=512)
 
 
+class UserOut(BaseModel):
+    id: uuid.UUID
+    email: str | None = None
+    name: str | None = None
+    role: str
+    avatar_url: str | None = None
+
+
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -35,6 +43,37 @@ class TokenOut(BaseModel):
     role: str
     user_id: uuid.UUID
     email: str | None = None
+    # Mobile only. The web keeps its refresh token in an httpOnly cookie and never sees it;
+    # an app has no cookie jar worth trusting and stores it in the platform keystore.
+    refresh_token: str | None = None
+    user: UserOut | None = None
+
+
+class RequestCodeIn(BaseModel):
+    email: EmailStr
+
+
+class RequestCodeOut(BaseModel):
+    status: str = "sent"
+    # Outside production only, for the same reason as `RequestLinkOut.dev_link`.
+    dev_code: str | None = None
+
+
+class VerifyCodeIn(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6, pattern="^[0-9]{6}$")
+
+
+class GoogleIn(BaseModel):
+    id_token: str = Field(min_length=20, max_length=4096)
+
+
+class DemoIn(BaseModel):
+    role: str = Field(pattern="^(diner|owner|admin)$")
+
+
+class RefreshIn(BaseModel):
+    refresh_token: str | None = Field(default=None, max_length=512)
 
 
 class MeOut(BaseModel):
