@@ -447,6 +447,105 @@ async def answer(query: str | None, rows: list[dict], party: int = 1) -> tuple[s
     return text_, "model"
 
 
+# --- raw calls, for the chat agent and Ghar ----------------------------------
+
+# Chosen by env so a stronger model can be tried without a deploy of code. The default is the
+# one measured above; function calling works on it at the same latency as on 3.5-flash.
+MODEL_CHAT = settings.gemini_chat_model or MODEL_EXPLAIN
+PRICE_PER_MTOK.setdefault(MODEL_CHAT, {"in": 0.30, "out": 2.50})
+MODEL_FALLBACK = "gemini-3.5-flash-lite"
+PRICE_PER_MTOK.setdefault(MODEL_FALLBACK, {"in": 0.10, "out": 0.40})
+
+
+async def call_raw(
+    body: dict, *, model: str | None = None, timeout: float = 8.0
+) -> dict | None:
+    """One `generateContent` with a caller-built body. The parsed response, or None.
+
+    Thinking is switched off unless the caller asks: every caller here rewords or selects from
+    facts already fetched, and a thinking budget is latency the diner sits through. The spend
+    is recorded against the same monthly guard as everything else.
+    """
+    if not available():
+        return None
+    model = model or MODEL_CHAT
+    sent = {**body, "generationConfig": dict(body.get("generationConfig") or {})}
+    # The 3.1 and 2.5 models take a budget of zero; 3.5 and later refuse it and take a level.
+    sent["generationConfig"].setdefault(
+        "thinkingConfig",
+        {"thinkingBudget": 0} if model.startswith(("gemini-3.1", "gemini-2.5"))
+        else {"thinkingLevel": "low"},
+    )
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=3.0)) as client:
+            response = await client.post(
+                GEMINI_URL.format(model=model),
+                headers={"x-goog-api-key": settings.gemini_api_key,
+                         "content-type": "application/json"},
+                json=sent,
+            )
+    except httpx.HTTPError as exc:
+        log.warning("Gemini unreachable: %s", exc)
+        return None
+    if response.status_code == 503 and model != MODEL_FALLBACK:
+        # "High demand" on one model is common and brief; a sibling usually answers.
+        log.info("Gemini %s overloaded, retrying on %s", model, MODEL_FALLBACK)
+        # Thought signatures are bound to the model that wrote them; another model refuses a
+        # conversation carrying them.
+        stripped = {**body, "contents": [
+            {**c, "parts": [{k: v for k, v in p.items() if k != "thoughtSignature"}
+                            for p in c.get("parts", [])]}
+            for c in body.get("contents", [])
+        ]}
+        return await call_raw(stripped, model=MODEL_FALLBACK, timeout=timeout)
+    if response.status_code != 200:
+        log.warning("Gemini returned %s: %s", response.status_code, response.text[:200])
+        return None
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    usage = payload.get("usageMetadata", {})
+    budget.record(
+        model, usage.get("promptTokenCount", 0),
+        max(usage.get("candidatesTokenCount", 0),
+            usage.get("totalTokenCount", 0) - usage.get("promptTokenCount", 0)),
+    )
+    if not payload.get("candidates"):
+        log.warning("Gemini returned no candidate: %s", str(payload)[:200])
+        return None
+    return payload
+
+
+def text_of(payload: dict | None) -> str:
+    if not payload:
+        return ""
+    parts = payload["candidates"][0].get("content", {}).get("parts") or []
+    return "".join(p.get("text", "") for p in parts if "text" in p and not p.get("thought"))
+
+
+async def generate_json(system: str, prompt: str, *, max_tokens: int = 4096,
+                        timeout: float = 20.0) -> dict | list | None:
+    """JSON mode. None on any failure, including output that does not parse."""
+    payload = await call_raw(
+        {
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": max_tokens,
+                                 "responseMimeType": "application/json"},
+        },
+        timeout=timeout,
+    )
+    raw = text_of(payload).strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        log.warning("Gemini JSON did not parse: %s", raw[:200])
+        return None
+
+
 def cache_stats() -> dict:
     return {"entries": len(_cache), "max": CACHE_MAX}
 

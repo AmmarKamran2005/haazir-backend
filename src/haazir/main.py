@@ -24,6 +24,7 @@ from .routers import (
     ask,
     auth,
     camera,
+    chat,
     deals,
     city,
     diner,
@@ -145,3 +146,4 @@ app.include_router(camera.router)
 app.include_router(camera.public_router)
 app.include_router(forecast.router)
 app.include_router(deals.router)
+app.include_router(chat.router)

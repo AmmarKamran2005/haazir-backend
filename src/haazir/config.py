@@ -117,6 +117,8 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     anthropic_api_key: str = ""
     llm_monthly_ceiling_usd: float = 25.0
+    # The chat agent's model. Empty means the explanation model in services/llm.py.
+    gemini_chat_model: str = ""
 
     # ── routing ───────────────────────────────────────────────────────────────
     osrm_url: str = ""
