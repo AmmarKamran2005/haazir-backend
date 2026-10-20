@@ -83,3 +83,18 @@ def test_camera_is_a_fusion_source_that_dominates_the_prior():
 def test_snapshot_url_is_signed():
     url = snapshot_url(uuid.uuid4())
     assert "/snapshot.jpg?exp=" in url and "&sig=" in url
+
+
+async def test_a_replayed_reading_is_refused_before_the_rate_limit():
+    import datetime as dt
+
+    from fastapi import HTTPException
+
+    from haazir.auth.camera import Camera
+    from haazir.routers.camera import IngestIn, ingest
+
+    cam = Camera(id=uuid.uuid4(), venue_id=uuid.uuid4(), name="x", kind="webcam")
+    old = IngestIn(ts=dt.datetime.now(dt.UTC) - dt.timedelta(minutes=5), tables=[])
+    with pytest.raises(HTTPException) as exc:
+        await ingest(old, cam)
+    assert exc.value.status_code == 409

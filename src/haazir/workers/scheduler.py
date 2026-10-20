@@ -24,7 +24,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from ..config import settings
 from ..db import service_session
-from ..services import recompute
+from ..services import activity, recompute
 
 log = logging.getLogger("haazir.scheduler")
 
@@ -32,46 +32,51 @@ log = logging.getLogger("haazir.scheduler")
 TZ = "Asia/Karachi"
 
 
-async def _refresh_live_state() -> None:
-    async with service_session() as session:
-        written = await recompute.refresh_live_state(session)
+async def refresh_once() -> None:
+    """One refresh, unconditionally. Also run by the first request after an idle spell."""
+    try:
+        async with service_session() as session:
+            written = await recompute.refresh_live_state(session)
+    except Exception as exc:  # noqa: BLE001 — a background job logs, it does not raise
+        log.warning("live_state refresh failed: %s", exc)
+        return
     if written:
         log.info("refreshed live_state for %d venues", written)
 
 
-async def _decay_facts() -> None:
-    async with service_session() as session:
-        rows = await recompute.decay_facts(session)
-    log.info("decayed access facts on %d venues", rows)
+async def _refresh_live_state() -> None:
+    """Every few minutes, and only while somebody is using the API.
+
+    Idle, it does no database I/O at all, so Neon can suspend its compute. Readings from
+    staff, cameras and check-ins re-fuse their own venue the moment they arrive; this timer
+    only moves the hour-of-week prior along for everybody else, and nobody needs that while
+    nobody is looking.
+    """
+    if activity.idle():
+        return
+    await refresh_once()
 
 
-async def _recompute_trust() -> None:
-    async with service_session() as session:
-        n = await recompute.recompute_trust(session)
-    log.info("recomputed trust for %d venues", n)
-
-
-async def _learn_priors() -> None:
-    async with service_session() as session:
-        n = await recompute.learn_priors(session)
-    log.info("learned %d hour-of-week priors from camera and staff readings", n)
-
-
-async def _purge() -> None:
-    """Expired magic links and spent group invites. §11."""
+async def _nightly() -> None:
+    """Every nightly job in one wake of the database, one after another."""
     from ..auth import group as group_auth
     from ..auth import magic_link
 
-    async with service_session() as session:
-        links = await magic_link.purge_expired(session)
-        invites = await group_auth.purge_consumed(session)
-    log.info("purged %d magic links and %d group invites", links, invites)
-
-
-async def _create_partitions() -> None:
-    async with service_session() as session:
-        name = await recompute.create_next_partition(session)
-    log.info("observation partition ready: %s", name)
+    steps = [
+        ("decay_facts", recompute.decay_facts),
+        ("learn_priors", recompute.learn_priors),
+        ("recompute_trust", recompute.recompute_trust),
+        ("purge_links", magic_link.purge_expired),
+        ("purge_invites", group_auth.purge_consumed),
+        ("partitions", recompute.create_next_partition),
+    ]
+    for name, job in steps:
+        try:
+            async with service_session() as session:
+                result = await job(session)
+            log.info("nightly %s: %s", name, result)
+        except Exception as exc:  # noqa: BLE001 — one failed step must not skip the rest
+            log.warning("nightly %s failed: %s", name, exc)
 
 
 def build() -> AsyncIOScheduler:
@@ -80,22 +85,18 @@ def build() -> AsyncIOScheduler:
     # The loop that makes the product live. Sixty seconds is the plan's cadence and it is
     # also about as slow as it can be: a diner deciding where to eat will not wait longer
     # than that for an estimate to catch up with the room.
+    # While the API is in use, the prior moves with the clock every two minutes; idle, the job
+    # returns before touching the database (see `_refresh_live_state`).
     scheduler.add_job(
-        _refresh_live_state, IntervalTrigger(seconds=60),
+        _refresh_live_state, IntervalTrigger(seconds=120),
         id="refresh_live_state", max_instances=1, coalesce=True,
         misfire_grace_time=30,
         # coalesce and max_instances together: if a cycle overruns, the next one is skipped
         # rather than queued. Stacking refreshes behind a slow one turns a hiccup into a
         # backlog that never clears.
     )
-
-    scheduler.add_job(_decay_facts, CronTrigger(hour=3, minute=10), id="decay_facts")
-    scheduler.add_job(_recompute_trust, CronTrigger(hour=3, minute=30), id="recompute_trust")
-    scheduler.add_job(_learn_priors, CronTrigger(hour=3, minute=45), id="learn_priors")
-    scheduler.add_job(_purge, CronTrigger(hour=4, minute=0), id="purge")
-    scheduler.add_job(
-        _create_partitions, CronTrigger(day=1, hour=2, minute=0), id="create_partitions"
-    )
+    scheduler.add_job(_nightly, CronTrigger(hour=3, minute=10), id="nightly",
+                      max_instances=1, coalesce=True)
     return scheduler
 
 

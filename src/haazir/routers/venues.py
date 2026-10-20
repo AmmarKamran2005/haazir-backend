@@ -195,6 +195,13 @@ async def venue_card(ident: str, ctx: Ctx) -> VenueCard:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no such venue")
 
     card = _card(row)
+    # The refresh timer sleeps while the API is idle, so a prior-only state can be from an
+    # hour that has passed. The prior is a pure function of the clock: read it fresh instead.
+    live = card.live
+    if (live is not None and set(live.source_weights or {}) <= {"prior"}
+            and live.updated_at is not None
+            and (dt.datetime.now(dt.UTC) - live.updated_at).total_seconds() > 3600):
+        card.live = None
     if card.live is None:
         card.live = await _prior_occupancy(ctx, card.id)
     from ..services import deals

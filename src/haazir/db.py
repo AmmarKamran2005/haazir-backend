@@ -151,8 +151,10 @@ def make_engine(url: str | None = None, **overrides: Any):
         pool_recycle=280,
         pool_timeout=10,
         pool_pre_ping=True,
-        pool_size=5,
-        max_overflow=5,
+        # Small: one machine, and every open connection is a reason for Neon's pooler to keep
+        # a backend alive. `pool_pre_ping` checks on checkout only; nothing pings on a timer.
+        pool_size=3,
+        max_overflow=4,
         connect_args=_connect_args(target),
         **overrides,
     )

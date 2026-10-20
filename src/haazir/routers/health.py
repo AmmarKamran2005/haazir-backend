@@ -22,7 +22,10 @@ REQUIRED_EXTENSIONS = ("postgis", "vector", "pg_trgm", "citext")
 
 @router.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "env": settings.app_env, "version": "0.1.0"}
+    # `demo_login` lets the app decide whether to offer the one-tap demo accounts without
+    # having to try signing in to find out.
+    return {"status": "ok", "env": settings.app_env, "version": "0.1.0",
+            "demo_login": settings.demo_login}
 
 
 @router.get("/health/db")

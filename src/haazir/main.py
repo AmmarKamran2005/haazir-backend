@@ -8,6 +8,7 @@ geo query is the thing that breaks.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -41,6 +42,8 @@ from .routers import (
     staff,
     venues,
 )
+from .services import activity
+from .services.respcache import CacheMiddleware
 from .workers import scheduler
 
 log = logging.getLogger("haazir")
@@ -119,6 +122,24 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Last-Event-ID"],
     max_age=600,
 )
+
+
+# Registered before the activity middleware below, so it runs inside it: a cached read is
+# still activity, and a hit returns before any session is opened.
+app.add_middleware(CacheMiddleware)
+
+
+@app.middleware("http")
+async def track_activity(request: Request, call_next):
+    """Mark the API busy, and catch up on the first request after an idle spell.
+
+    While idle the refresh timer does nothing (services/activity.py), so live_state may still
+    carry the prior of an hour that has passed. The first real request schedules one refresh
+    in the background; it does not wait for it.
+    """
+    if not activity.ignored(request.url.path) and activity.touch() and db.engine is not None:
+        asyncio.create_task(scheduler.refresh_once())
+    return await call_next(request)
 
 
 @app.middleware("http")

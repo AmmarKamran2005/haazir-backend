@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     # test suite, where it would turn every multi-step test into a race against a
     # per-minute ceiling. The middleware has its own tests instead.
     rate_limit_enabled: bool = True
+    # The short public-read cache (services/respcache.py). Off in the test suite, where a
+    # test reads straight back what it just wrote through a path that does not go via HTTP.
+    response_cache_enabled: bool = True
 
     # ── auth ──────────────────────────────────────────────────────────────────
     jwt_secret: str = Field(default="", description="32+ random bytes. Server only.")

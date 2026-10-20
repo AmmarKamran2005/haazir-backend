@@ -49,6 +49,8 @@ CAMERA_SIGMA = 0.05
 CAMERA_TRUST = 0.95
 # One reading per three seconds per camera. The box sends every five.
 INGEST_WINDOW_S = 3
+# A reading whose own timestamp is older than this is a replay, and is refused.
+STALE_READING_S = 60
 # "Online" in the owner's list, and "the table map is the camera's" in the public one.
 ONLINE_WITHIN_S = 30
 CAMERA_FRESH_S = 120
@@ -314,6 +316,14 @@ async def put_zones(body: ZonesDoc, cam: CurrentCamera) -> ZonesDoc:
 
 @router.post("/ingest", status_code=status.HTTP_202_ACCEPTED)
 async def ingest(body: IngestIn, cam: CurrentCamera) -> dict:
+    # A reading replayed after an outage describes a room that has since changed; written as
+    # "now" it would overwrite the fresh state, and written at its own time it is already
+    # below the fusion's horizon. Refused before the rate limit, so a replay costs nothing.
+    if body.ts is not None:
+        ts = body.ts if body.ts.tzinfo else body.ts.replace(tzinfo=dt.UTC)
+        if (dt.datetime.now(dt.UTC) - ts).total_seconds() > STALE_READING_S:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail="This reading is too old to describe the room now.")
     try:
         ratelimit.check(f"camera:{cam.id}", 1, window_s=INGEST_WINDOW_S)
     except ratelimit.RateLimited as exc:

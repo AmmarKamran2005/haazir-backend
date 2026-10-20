@@ -68,6 +68,7 @@ os.environ.setdefault("RUN_SCHEDULER", "false")
 # group constraints in a second is not abuse, and a per-minute ceiling would make the
 # suite fail on speed rather than on behaviour. `test_throttle.py` covers it directly.
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
+os.environ.setdefault("RESPONSE_CACHE_ENABLED", "false")
 # Overwrite, not setdefault. `api/.env` carries a real Gemini key, and without this the suite
 # would make live, billed calls to a third party — slow, chargeable, and dependent on someone
 # else's uptime for a green build. The no-key path is also the one worth testing by default,
