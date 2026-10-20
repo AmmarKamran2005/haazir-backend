@@ -14,6 +14,7 @@ first because it is the one thing a diner can actually change; an access require
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import uuid
 
@@ -52,8 +53,8 @@ class SearchIn(BaseModel):
     city: str = "Karachi"
 
 
-@router.post("/search")
-async def search(body: SearchIn, ctx: Ctx) -> dict:
+async def _ranked(body: SearchIn, ctx: Ctx) -> tuple[Query, dict, list[dict]]:
+    """The ranked list, every row explained by its own template. Shared by both endpoints."""
     q = Query(
         text=body.text, from_lat=body.from_lat, from_lng=body.from_lng,
         party=body.party, budget=body.budget, max_travel=body.max_travel,
@@ -110,7 +111,12 @@ async def search(body: SearchIn, ctx: Ctx) -> dict:
         if row["matched_name"]:
             row["why"] = "Matches the name you typed. " + row["why"]
         rows.append(row)
+    return q, result, rows
 
+
+@router.post("/search")
+async def search(body: SearchIn, ctx: Ctx) -> dict:
+    _q, result, rows = await _ranked(body, ctx)
     return {
         "results": rows,
         "count": len(result["results"]),
@@ -126,6 +132,34 @@ async def search(body: SearchIn, ctx: Ctx) -> dict:
             sum(1 for r in result["results"] if r.occupancy_source == "live")
             / max(1, len(result["results"])), 3
         ),
+    }
+
+
+@router.post("/search/answer")
+async def search_answer(body: SearchIn, ctx: Ctx) -> dict:
+    """The model's part, asked for after the list is already on screen.
+
+    Same query, same ranking — the order is decided by the arithmetic in `/search` and the
+    model never touches it. What Gemini adds is language: one answer above the list in the
+    diner's own words, and a reason per card for the top three. Each comes back with its
+    source, so the interface labels what a model wrote; a missing key, a timeout or a tripped
+    budget falls back to the templates and the page still works.
+    """
+    q, _result, rows = await _ranked(body, ctx)
+    top = rows[:3]
+    sentences = await asyncio.gather(
+        *(llm.explain_result(row, party=q.party) for row in top),
+        llm.answer(body.text, top, q.party),
+    )
+    summary, summary_source = sentences[-1]
+    return {
+        "summary": summary,
+        "summary_source": summary_source,
+        "model": llm.MODEL_EXPLAIN if summary_source in ("model", "cache") else None,
+        "whys": [
+            {"venue_id": row["venue_id"], "slug": row.get("slug"), "why": why, "why_source": src}
+            for row, (why, src) in zip(top, sentences[:-1], strict=True)
+        ],
     }
 
 

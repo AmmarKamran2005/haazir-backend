@@ -62,6 +62,9 @@ WARN_AT = 0.70
 DEGRADE_AT = 0.90
 
 _TIMEOUT = httpx.Timeout(8.0, connect=3.0)
+# The intent fallback sits in front of a search the diner is waiting on, so it gets less
+# patience than an explanation that fills in after the results are already on screen.
+_INTENT_TIMEOUT = httpx.Timeout(4.5, connect=2.0)
 
 
 @dataclass
@@ -207,12 +210,15 @@ _EXPLAIN_SYSTEM = (
 )
 
 
-async def _call(model: str, system: str, prompt: str, max_tokens: int = 160) -> str | None:
+async def _call(
+    model: str, system: str, prompt: str, max_tokens: int = 160,
+    timeout: httpx.Timeout | None = None,
+) -> str | None:
     """One request. Returns None on any failure; the caller already has a template."""
     if not settings.gemini_api_key:
         return None
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=timeout or _TIMEOUT) as client:
             response = await client.post(
                 GEMINI_URL.format(model=model),
                 headers={
@@ -286,7 +292,8 @@ async def extract_intent(
         f"CUISINES: {', '.join(cuisines)}\n\n"
         f"Diner typed: {phrase}"
     )
-    raw = await _call(MODEL_INTENT, _INTENT_SYSTEM, prompt, max_tokens=120)
+    raw = await _call(MODEL_INTENT, _INTENT_SYSTEM, prompt, max_tokens=120,
+                      timeout=_INTENT_TIMEOUT)
     if not raw:
         return empty
 
@@ -365,6 +372,79 @@ async def explain_result(
         _cache.clear()
     _cache[key] = sentence
     return sentence, "model"
+
+
+# --- the answer above the list ----------------------------------------------
+
+_ANSWER_SYSTEM = (
+    "You are HAAZIR, a live restaurant guide for Karachi. Answer what the diner asked in one "
+    "or two short sentences: recommend the first venue and, if it helps, one alternative.\n"
+    "RULES:\n"
+    "- Use ONLY the venues and numbers given. Never invent a dish, a price, a wait or a fact.\n"
+    "- If a venue's source is NOT 'live', say its figure is the usual pattern for this hour, "
+    "not a live reading.\n"
+    "- Reply in the diner's own language: Roman Urdu if they wrote Roman Urdu, else English.\n"
+    "- Round numbers as a person would. No greeting, no emoji, no markdown."
+)
+
+
+def answer_template(rows: list[dict]) -> str:
+    """The same answer from the numbers alone, for when no model is available."""
+    if not rows:
+        return ""
+    top = rows[0]
+    live = top.get("live") or {}
+    text_ = f"Top pick: {top.get('name')} in {top.get('area')}, about {top.get('travel_min')} min away"
+    if live.get("wait_p50_min") is not None:
+        text_ += f", around {round(float(live['wait_p50_min']))} min wait"
+    text_ += "."
+    if live.get("source") != "live":
+        text_ += " That is its usual pattern for this hour, not a live reading."
+    if len(rows) > 1:
+        text_ += f" Also worth a look: {rows[1].get('name')}."
+    return text_
+
+
+async def answer(query: str | None, rows: list[dict], party: int = 1) -> tuple[str, str]:
+    """`(text, source)`: one recommendation in the diner's words, written from the ranked rows.
+
+    The ranking is already decided; the model only says it. The template is built first, so a
+    missing key, a timeout or a tripped budget still returns an answer.
+    """
+    template = answer_template(rows)
+    if not rows or not available():
+        return template, "template"
+
+    key = "answer|" + _cache_key(
+        (query or "").strip().lower() + "|" + ",".join(str(r.get("venue_id")) for r in rows[:3]),
+        "", party, dt.datetime.now(dt.UTC).hour // 3,
+    )
+    if key in _cache:
+        return _cache[key], "cache"
+
+    lines = []
+    for i, r in enumerate(rows[:3], start=1):
+        live = r.get("live") or {}
+        lines.append(
+            f"{i}. {r.get('name')} ({r.get('area')}): "
+            f"{round((live.get('occupancy') or 0) * 100)}% full, band {live.get('band')}, "
+            f"source {live.get('source')}, wait {live.get('wait_p50_min')} min, "
+            f"travel {r.get('travel_min')} min"
+        )
+    prompt = (
+        f"Diner typed: {query or '(nothing, just browsing)'}\n"
+        f"Party size: {party}\n"
+        "Ranked venues, best first:\n"
+        + "\n".join(lines)
+        + "\n\nWrite the answer."
+    )
+    text_ = await _call(MODEL_EXPLAIN, _ANSWER_SYSTEM, prompt, max_tokens=140)
+    if text_ is None:
+        return template, "template"
+    if len(_cache) >= CACHE_MAX:
+        _cache.clear()
+    _cache[key] = text_
+    return text_, "model"
 
 
 def cache_stats() -> dict:

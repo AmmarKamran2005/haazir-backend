@@ -473,3 +473,42 @@ async def test_a_word_in_many_names_does_not_count_as_a_name(client):
     r = await client.post("/v1/search", json={"text": "nihari", "party": 2})
     assert r.status_code == 200, r.text
     assert not any(row["matched_name"] for row in r.json()["results"])
+
+
+# --- the model's part: an answer above the list ------------------------------
+
+
+async def test_the_answer_falls_back_to_templates_without_a_key(client):
+    async with service_session() as s:
+        await ingest.load_venues(s, [venue("a1", "Zahid Nihari"), venue("a2", "Javed Nihari")])
+    r = await client.post("/v1/search/answer", json={"text": "nihari", "party": 2})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["summary_source"] == "template"
+    assert body["summary"].startswith("Top pick:")
+    assert body["model"] is None
+    assert body["whys"] and all(w["why_source"] == "template" for w in body["whys"])
+
+
+async def test_the_answer_is_written_by_the_model_when_one_is_available(client, monkeypatch):
+    from haazir import config
+    from haazir.services import llm
+
+    async with service_session() as s:
+        await ingest.load_venues(s, [venue("b1", "Zahid Nihari"), venue("b2", "Javed Nihari")])
+    monkeypatch.setattr(config.settings, "gemini_api_key", "test-key")
+    llm.reset()
+
+    async def fake_call(model, system, prompt, max_tokens=160, timeout=None):
+        return "Go to Zahid Nihari." if "Ranked venues" in prompt else "A model sentence."
+
+    monkeypatch.setattr(llm, "_call", fake_call)
+    r = await client.post("/v1/search/answer", json={"text": "nihari", "party": 2})
+    body = r.json()
+    assert body["summary"] == "Go to Zahid Nihari."
+    assert body["summary_source"] == "model"
+    assert body["model"] == llm.MODEL_EXPLAIN
+    assert {w["why_source"] for w in body["whys"]} == {"model"}
+    # The ranking itself is the same one /search returns; the model only words it.
+    plain = (await client.post("/v1/search", json={"text": "nihari", "party": 2})).json()
+    assert [w["venue_id"] for w in body["whys"]] == [x["venue_id"] for x in plain["results"][:3]]
