@@ -30,6 +30,7 @@ from .routers import (
     diner,
     dishes,
     forecast,
+    ghar,
     group,
     health,
     ingest,
@@ -147,3 +148,4 @@ app.include_router(camera.public_router)
 app.include_router(forecast.router)
 app.include_router(deals.router)
 app.include_router(chat.router)
+app.include_router(ghar.router)
