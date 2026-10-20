@@ -22,8 +22,12 @@ ZONES = {
 
 
 async def test_a_camera_reading_moves_the_live_state_and_the_table_map(
-    client, venue_factory, user_factory
+    client, venue_factory, user_factory, monkeypatch
 ):
+    from haazir.routers import camera
+
+    # Wide enough that the second post lands inside it even across the Neon round trips.
+    monkeypatch.setattr(camera, "INGEST_WINDOW_S", 120)
     owner_id, _ = await user_factory(role="owner")
     venue_id = await venue_factory("Camera Cafe", claimed_by=owner_id)
     owner = {"Authorization": f"Bearer {issue_access(owner_id, 'owner')}"}
@@ -49,7 +53,7 @@ async def test_a_camera_reading_moves_the_live_state_and_the_table_map(
     assert r.status_code == 202, r.text
     assert r.json()["occupancy"] == 0.75
 
-    # Rate limited: a second reading inside three seconds.
+    # Rate limited: a second reading inside the window.
     assert (await client.post("/v1/camera/ingest", json={"tables": []},
                               headers=cam)).status_code == 429
 

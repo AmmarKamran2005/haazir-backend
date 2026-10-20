@@ -277,24 +277,25 @@ async def demo_sign_in(body: DemoIn, request: Request, ctx: Ctx) -> TokenOut:
         email, name = settings.demo_admin_email, None
     else:
         email, name = DEMO_USERS[body.role]
-    user_id = await ctx.session.scalar(
-        text(
-            """
-            INSERT INTO app_user (email, email_verified, role, display_name, last_seen_at)
-            VALUES (:email, TRUE, CAST(:role AS user_role), :name, now())
-            ON CONFLICT (email) DO UPDATE
-               SET role = EXCLUDED.role, last_seen_at = now(),
-                   display_name = COALESCE(app_user.display_name, EXCLUDED.display_name)
-         RETURNING id
-            """
-        ),
-        {"email": email, "role": body.role, "name": name},
-    )
-    if body.role == "owner":
-        from ..db import service_session
+    from ..db import service_session
 
-        # The protected-columns trigger lets only admin or service set `claimed_by`.
-        async with service_session() as s:
+    # One service transaction for both writes: the venue's `claimed_by` must see the user
+    # row, and the protected-columns trigger lets only admin or service set it.
+    async with service_session() as s:
+        user_id = await s.scalar(
+            text(
+                """
+                INSERT INTO app_user (email, email_verified, role, display_name, last_seen_at)
+                VALUES (:email, TRUE, CAST(:role AS user_role), :name, now())
+                ON CONFLICT (email) DO UPDATE
+                   SET role = EXCLUDED.role, last_seen_at = now(),
+                       display_name = COALESCE(app_user.display_name, EXCLUDED.display_name)
+             RETURNING id
+                """
+            ),
+            {"email": email, "role": body.role, "name": name},
+        )
+        if body.role == "owner":
             await s.execute(
                 text(
                     """
