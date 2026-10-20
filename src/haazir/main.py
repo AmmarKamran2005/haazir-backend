@@ -27,6 +27,7 @@ from .routers import (
     city,
     diner,
     dishes,
+    forecast,
     group,
     health,
     ingest,
@@ -141,3 +142,4 @@ app.include_router(owner.router)
 app.include_router(camera.owner_router)
 app.include_router(camera.router)
 app.include_router(camera.public_router)
+app.include_router(forecast.router)
