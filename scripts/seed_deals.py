@@ -5,7 +5,7 @@
 Defaults to the data session's `scraper/out/deals_seed.json`. A venue row is matched on
 `place_id`, then on `venue_slug`; a row whose venue is not in this database is skipped and
 reported. Chain rows need no venue. The hero venue gets an HBL deal if the file gives it
-none, because the stage script asks for one.
+no HBL deal, because the stage script asks for one.
 """
 
 from __future__ import annotations
@@ -41,7 +41,8 @@ HERO_DEAL = {
 async def main(data: dict | list) -> None:
     rows = data["deals"] if isinstance(data, dict) else data
     rows = list(rows)
-    if not any(r.get("venue_slug") == settings.demo_hero_venue for r in rows):
+    if not any(r.get("venue_slug") == settings.demo_hero_venue and r.get("bank") == "HBL"
+               for r in rows):
         rows.append({**HERO_DEAL, "venue_slug": settings.demo_hero_venue})
 
     loaded, skipped = 0, []

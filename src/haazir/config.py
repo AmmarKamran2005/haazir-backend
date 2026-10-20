@@ -99,7 +99,7 @@ class Settings(BaseSettings):
     google_client_ids: str = ""
     # One-tap demo accounts for the stage. Off unless explicitly set, in every environment.
     demo_login: bool = False
-    demo_hero_venue: str = "naseeb-biryani-gazb84"
+    demo_hero_venue: str = "allah-wala-biryani-8ui2q0"
     demo_admin_email: str = "ammarkamran05@gmail.com"
 
     # ── rate limits (§5 rule 4) ───────────────────────────────────────────────
