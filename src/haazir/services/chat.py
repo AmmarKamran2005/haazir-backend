@@ -59,7 +59,9 @@ SYSTEM = (
     "- When a card deal applies to the user's bank, mention it with its discount.\n"
     "- For any question about a later time ('9 baje', 'tonight', 'kal'), call get_forecast "
     "and answer from it; never guess how busy a place will be.\n"
-    "- percent_of_tables_taken is how full a place is, not how empty.\n"
+    "- Say how busy a place is ONLY with its status phrase, as given (Abhi khali / Thoda "
+    "rush / Rush / Full ~N min wait). Never give a percentage, a number of tables, or the "
+    "words moderate, occupancy, band or estimate.\n"
     "- No markdown headings, no emoji, no greeting.\n"
     "- Follow the conversation. 'yahan', 'wahan', 'is restaurant', 'here', 'there' mean the "
     "venue in FOCUS when one is given. For menu or price questions about a venue, call "
@@ -157,6 +159,26 @@ def banks_in(text: str) -> list[str]:
     return found
 
 
+# The only words a customer sees for how busy a place is (FINALPLAN §0 rule 8): never a
+# percentage, never "moderate". Roman Urdu first, English after the slash.
+PLAIN = {
+    "free": ("Abhi khali", "free right now"),
+    "moderate": ("Thoda rush", "a little busy"),
+    "busy": ("Rush hai", "busy"),
+    "full": ("Full", "full"),
+}
+
+
+def status_phrase(band: str | None, wait_min: float | int | None = None) -> str | None:
+    if band not in PLAIN:
+        return None
+    roman, english = PLAIN[band]
+    wait = round(wait_min or 0)
+    if band in ("busy", "full") and wait > 2:
+        roman, english = f"{roman}, ~{wait} min wait", f"{english}, ~{wait} min wait"
+    return f"{roman} / {english}"
+
+
 def compact(row: dict, deals: list[dict] | None = None) -> dict:
     """A search row as the model sees it. Plain words and numbers, nothing internal."""
     live = row.get("live") or {}
@@ -164,9 +186,8 @@ def compact(row: dict, deals: list[dict] | None = None) -> dict:
         "slug": row["slug"],
         "name": row["name"],
         "area": row.get("area"),
-        "status": live.get("band"),
+        "status": status_phrase(live.get("band"), live.get("wait_p50_min")),
         "measured_now": live.get("source") == "live",
-        "percent_of_tables_taken": round((live.get("occupancy") or 0) * 100),
         "wait_min": round(live.get("wait_p50_min") or 0),
         "travel_min": row.get("travel_min"),
         "spend_pkr_for_party": row.get("expected_spend_pkr"),
@@ -233,7 +254,8 @@ class Agent:
             "area": card.area.name if card.area else None, "address": card.address_full,
             "phone": card.phone, "cuisines": card.cuisines[:6],
             "avg_ticket_pkr": card.avg_ticket_pkr, "rating": card.google_rating,
-            "status": card.live.band if card.live else None,
+            "status": (status_phrase(card.live.band, card.live.wait_p50_min)
+                       if card.live else None),
             "deals": [f"{d.bank} {d.discount_pct}% off" + (f" up to Rs {d.cap:,}" if d.cap else "")
                       for d in card.deals],
         }
@@ -246,8 +268,8 @@ class Agent:
         live = card.live
         if live is None:
             return {"slug": slug, "status": "unknown"}
-        return {"slug": slug, "name": card.name, "status": live.band,
-                "percent_of_tables_taken": round(live.occupancy * 100),
+        return {"slug": slug, "name": card.name,
+                "status": status_phrase(live.band, live.wait_p50_min),
                 "wait_min": round(live.wait_p50_min or 0),
                 "measured_now": live.source == "live"}
 
@@ -259,7 +281,8 @@ class Agent:
         if venue_id is None:
             return {"error": "no such venue"}
         out = await forecast_for(self.ctx.session, venue_id, hours=8)
-        points = [{"at": p["at"][11:16], "status": p["band"], "wait_min": p["wait_min"]}
+        points = [{"at": p["at"][11:16], "status": status_phrase(p["band"], p["wait_min"]),
+                   "wait_min": p["wait_min"]}
                   for p in out["points"]]
         if at and re.fullmatch(r"\d{1,2}:\d{2}", at):
             h, m = (int(x) for x in at.split(":"))
@@ -269,9 +292,9 @@ class Agent:
                 when += dt.timedelta(days=1)
             point = forecast.at_time(out, when)
             return {"slug": slug, "at": at,
-                    "status": point["band"] if point else None,
+                    "status": status_phrase(point["band"], point["wait_min"]) if point else None,
                     "wait_min": point["wait_min"] if point else None}
-        return {"slug": slug, "now": out["now"]["band"], "next_hours": points}
+        return {"slug": slug, "now": status_phrase(out["now"]["band"]), "next_hours": points}
 
     async def get_menu(self, slug: str, **_) -> dict:
         from ..routers.menu import menu_for
@@ -444,25 +467,23 @@ def menu_reply(name: str, items: list[dict], roman: bool) -> str:
 
 
 def template_reply(rows: list[dict], roman: bool) -> str:
-    """The answer from the numbers alone."""
+    """The answer from the numbers alone, in the same plain words the model is given."""
     if not rows:
         return ("Is waqt is hisaab se koi jagah nahi mili. Area ya budget thoda badal kar "
                 "dekhein." if roman else
                 "Nothing matched that right now. Try a nearby area or a higher budget.")
     top = rows[0]
-    status = {"free": "abhi khali hai" if roman else "has free tables now",
-              "moderate": "thoda rush hai" if roman else "is moderately busy",
-              "busy": "kaafi rush hai" if roman else "is busy",
-              "full": "full hai" if roman else "is full"}.get(top.get("status") or "", "")
+    phrase = top.get("status") or ""
+    roman_part, _, english_part = phrase.partition(" / ")
+    status = roman_part if roman else english_part
+    if status and "wait" not in status:
+        status += ", " + wait_phrase(top.get("wait_min"), roman)
     deal = f" {top['deals'][0]}." if top.get("deals") else ""
-    if roman:
-        text = f"{top['name']} ({top['area']}) {status}, {wait_phrase(top['wait_min'], True)}.{deal}"
-        if len(rows) > 1:
-            text += f" Doosra option: {rows[1]['name']}."
-    else:
-        text = f"{top['name']} in {top['area']} {status}, {wait_phrase(top['wait_min'], False)}.{deal}"
-        if len(rows) > 1:
-            text += f" Also worth a look: {rows[1]['name']}."
+    where = f"{top['name']} ({top['area']})" if top.get("area") else top["name"]
+    text = f"{where}: {status}.{deal}" if status else f"{where}.{deal}"
+    if len(rows) > 1:
+        text += (f" Doosra option: {rows[1]['name']}." if roman
+                 else f" Also worth a look: {rows[1]['name']}.")
     return text
 
 
@@ -578,9 +599,8 @@ async def _venue_brief(ctx: AuthContext, venue_id) -> dict | None:
     live = card.live
     return {
         "slug": card.slug, "name": card.name, "area": card.area.name if card.area else None,
-        "status": live.band if live else None,
+        "status": status_phrase(live.band, live.wait_p50_min) if live else None,
         "measured_now": bool(live and live.source == "live"),
-        "percent_of_tables_taken": round(live.occupancy * 100) if live else None,
         "wait_min": round(live.wait_p50_min or 0) if live else 0,
         "deals": [f"{d.bank} {d.discount_pct}% off" for d in card.deals[:3]],
         "offers": [o["title"] for o in card.offers[:3]],
