@@ -58,7 +58,11 @@ SYSTEM = (
     "- For any question about a later time ('9 baje', 'tonight', 'kal'), call get_forecast "
     "and answer from it; never guess how busy a place will be.\n"
     "- percent_of_tables_taken is how full a place is, not how empty.\n"
-    "- No markdown headings, no emoji, no greeting."
+    "- No markdown headings, no emoji, no greeting.\n"
+    "- Follow the conversation. 'yahan', 'wahan', 'is restaurant', 'here', 'there' mean the "
+    "venue in FOCUS when one is given. For menu or price questions about a venue, call "
+    "get_menu and quote dishes with price and portion.\n"
+    "- Never say '0 min wait'; say there is no wait right now."
 )
 
 TOOLS = [
@@ -105,6 +109,12 @@ TOOLS = [
                                    "at": {"type": "string", "description": "HH:MM, Karachi time"}},
                     "required": ["slug"],
                 },
+            },
+            {
+                "name": "get_menu",
+                "description": "A venue's menu: dishes with price and portion (serving size).",
+                "parameters": {"type": "object", "properties": {"slug": {"type": "string"}},
+                               "required": ["slug"]},
             },
             {
                 "name": "compare_dish_prices",
@@ -259,6 +269,20 @@ class Agent:
                     "wait_min": point["wait_min"] if point else None}
         return {"slug": slug, "now": out["now"]["band"], "next_hours": points}
 
+    async def get_menu(self, slug: str, **_) -> dict:
+        from ..routers.menu import menu_for
+
+        venue_id = await lookup.venue_id_for(self.ctx.session, slug)
+        if venue_id is None:
+            return {"error": "no such venue"}
+        menu = await menu_for(self.ctx.session, venue_id, limit=60)
+        priced = [m for m in menu if m["price_pkr"]] or menu
+        items = [{"name": m["menu_name"], "section": m["section"], "price_pkr": m["price_pkr"],
+                  "portion": m["portion"], "sold_out": m["sold_out"]} for m in priced[:30]]
+        self.dishes = [{"slug": slug, **i} for i in items]
+        return {"slug": slug, "items": items, "count": len(menu),
+                "note": None if menu else "No menu has been published for this venue yet."}
+
     async def compare_dish_prices(self, dish: str, **_) -> dict:
         from ..routers.dishes import dish_prices
 
@@ -290,6 +314,7 @@ class Agent:
             "search_venues": self.search_venues, "get_venue": self.get_venue,
             "get_live": self.get_live, "get_forecast": self.get_forecast,
             "compare_dish_prices": self.compare_dish_prices, "get_deals": self.get_deals,
+            "get_menu": self.get_menu,
         }.get(name)
 
     async def run_tool(self, name: str, args: dict) -> dict:
@@ -327,6 +352,9 @@ def _contents(messages: list[dict], context: str) -> list[dict]:
 async def _model_turn(agent: Agent, messages: list[dict], context: str) -> str | None:
     contents = _contents(messages, context)
     deadline = time.monotonic() + TOTAL_BUDGET_S
+    # The model that wrote a tool call is asked first for the next round: the call carries its
+    # thought signature, which only it accepts. The chain strips it for any other model.
+    model = None
     for _ in range(MAX_TOOL_ROUNDS + 1):
         remaining = deadline - time.monotonic()
         if remaining < 2:
@@ -334,10 +362,11 @@ async def _model_turn(agent: Agent, messages: list[dict], context: str) -> str |
         payload = await llm.call_raw(
             {"system_instruction": {"parts": [{"text": SYSTEM}]}, "contents": contents,
              "tools": TOOLS, "generationConfig": {"maxOutputTokens": 600, "temperature": 0.4}},
-            timeout=min(PER_CALL_S, remaining),
+            model=model, timeout=min(PER_CALL_S, remaining),
         )
         if payload is None:
             return None
+        model = payload.get("_model")
         content = payload["candidates"][0].get("content") or {}
         parts = content.get("parts") or []
         calls = [p["functionCall"] for p in parts if "functionCall" in p]
@@ -378,6 +407,27 @@ async def _grounded(question: str, roman: bool) -> tuple[str | None, list[dict]]
     return llm.text_of(payload).strip() or None, sources
 
 
+def wait_phrase(minutes: int | float | None, roman: bool) -> str:
+    """Never "about 0 min wait"."""
+    m = round(minutes or 0)
+    if m <= 2:
+        return "abhi koi wait nahi" if roman else "no wait right now"
+    return f"takreeban {m} min wait" if roman else f"about {m} min wait"
+
+
+def menu_reply(name: str, items: list[dict], roman: bool) -> str:
+    """A menu answer from the menu alone, for when no model is available."""
+    priced = [i for i in items if i.get("price_pkr")][:6]
+    if not priced:
+        return (f"{name} ka menu abhi humare paas nahi hai." if roman
+                else f"We don't have {name}'s menu yet.")
+    lines = "; ".join(
+        f"{i['name']} Rs {i['price_pkr']:,}" + (f" ({i['portion']})" if i.get("portion") else "")
+        for i in priced
+    )
+    return f"{name} ke kuch items: {lines}." if roman else f"Some of {name}'s menu: {lines}."
+
+
 def template_reply(rows: list[dict], roman: bool) -> str:
     """The answer from the numbers alone."""
     if not rows:
@@ -391,11 +441,11 @@ def template_reply(rows: list[dict], roman: bool) -> str:
               "full": "full hai" if roman else "is full"}.get(top.get("status") or "", "")
     deal = f" {top['deals'][0]}." if top.get("deals") else ""
     if roman:
-        text = f"{top['name']} ({top['area']}) {status}, takreeban {top['wait_min']} min wait.{deal}"
+        text = f"{top['name']} ({top['area']}) {status}, {wait_phrase(top['wait_min'], True)}.{deal}"
         if len(rows) > 1:
             text += f" Doosra option: {rows[1]['name']}."
     else:
-        text = f"{top['name']} in {top['area']} {status}, about {top['wait_min']} min wait.{deal}"
+        text = f"{top['name']} in {top['area']} {status}, {wait_phrase(top['wait_min'], False)}.{deal}"
         if len(rows) > 1:
             text += f" Also worth a look: {rows[1]['name']}."
     return text
@@ -409,24 +459,107 @@ def suggestions(roman: bool, has_venues: bool) -> list[str]:
     return base if has_venues else ["Biryani in Bahadurabad", "BBQ in Clifton"]
 
 
+_DEICTIC = re.compile(
+    r"\b(yahan|yahaan|wahan|wahaan|idhar|udhar|is restaurant|us restaurant|is jagah|us jagah|"
+    r"iska|uska|iski|uski|inka|unka|here|there|this place|that place|this restaurant|"
+    r"that restaurant|their)\b"
+)
+_MENU = re.compile(
+    r"\b(menu|kya milta|kya kya|dishes|items|price|prices|rate|rates|kitne ka|kitne ki|"
+    r"kitna|serve|khana kya)\b"
+)
+
+
+def is_menu_question(text: str) -> bool:
+    return bool(_MENU.search(text.lower()))
+
+
+def refers_back(text: str) -> bool:
+    return bool(_DEICTIC.search(text.lower()))
+
+
+async def focus_venue(ctx: AuthContext, messages: list[dict],
+                      explicit: str | None = None) -> dict | None:
+    """The venue the conversation is about: the one the client names, else the most recent
+    one named in the conversation, this message included."""
+    from . import names
+
+    if explicit:
+        vid = await lookup.venue_id_for(ctx.session, explicit)
+        if vid:
+            return await _venue_brief(ctx, vid)
+    for m in reversed(messages[-10:]):
+        ids = await names.venues_named_in(ctx.session, m["content"][:280], limit=1)
+        if ids:
+            return await _venue_brief(ctx, ids[0])
+    return None
+
+
+async def _venue_brief(ctx: AuthContext, venue_id) -> dict | None:
+    from ..routers.venues import venue_card
+
+    try:
+        card = await venue_card(str(venue_id), ctx)
+    except Exception:  # noqa: BLE001
+        return None
+    live = card.live
+    return {
+        "slug": card.slug, "name": card.name, "area": card.area.name if card.area else None,
+        "status": live.band if live else None,
+        "measured_now": bool(live and live.source == "live"),
+        "percent_of_tables_taken": round(live.occupancy * 100) if live else None,
+        "wait_min": round(live.wait_p50_min or 0) if live else 0,
+        "deals": [f"{d.bank} {d.discount_pct}% off" for d in card.deals[:3]],
+        "offers": [o["title"] for o in card.offers[:3]],
+    }
+
+
 async def respond(ctx: AuthContext, messages: list[dict], *, lat: float | None,
-                  lng: float | None, area: str | None, cards: list[str]) -> dict:
+                  lng: float | None, area: str | None, cards: list[str],
+                  venue: str | None = None) -> dict:
     question = messages[-1]["content"]
     roman = is_roman_urdu(question)
     cards = [deals_service.canonical_bank(c) for c in cards if c] or banks_in(question)
     agent = Agent(ctx, lat=lat, lng=lng, area=area, cards=cards)
 
-    # The deterministic answer first: it is the context for the model and the fallback.
+    focus = None
     try:
-        rows = await agent.search_venues(query=question, area=area,
-                                         card_bank=cards[0] if cards else None)
+        focus = await focus_venue(ctx, messages, venue)
     except Exception as exc:  # noqa: BLE001
-        log.warning("chat pre-search failed: %s", exc)
-        rows = []
+        log.warning("chat focus lookup failed: %s", exc)
+    asks_menu = is_menu_question(question)
+    # "Yahan ka menu btao" is about the venue already on the table, not a new search.
+    # A menu question without "yahan" is still a follow-up when it names the venue ("China
+    # Town ka menu") or is too short to be a new search ("menu btao"); "Bahadurabad mein
+    # biryani kitne ki" is a new search and keeps the normal path.
+    named_now = bool(focus) and focus["name"].lower().split(" ")[0] in question.lower()
+    about_focus = bool(focus) and (
+        refers_back(question) or venue is not None
+        or (asks_menu and (named_now or len(question.split()) <= 5))
+    )
+
+    rows: list[dict] = []
+    menu: dict | None = None
+    if about_focus:
+        rows = [focus]
+        agent.seen[focus["slug"]] = focus
+        if asks_menu:
+            menu = await agent.get_menu(focus["slug"])
+    else:
+        # The deterministic answer first: it is the context for the model and the fallback.
+        try:
+            rows = await agent.search_venues(query=question, area=area,
+                                             card_bank=cards[0] if cards else None)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("chat pre-search failed: %s", exc)
     agent.tool_calls.clear()
 
     context = (
-        "CONTEXT (live results for the user's latest message, best first; you may call "
+        (f"FOCUS (the venue this conversation is about): "
+         f"{json.dumps(focus, ensure_ascii=False)}\n" if focus else "")
+        + (f"MENU of {focus['name']}: {json.dumps(menu, ensure_ascii=False)}\n"
+           if menu and focus else "")
+        + "CONTEXT (live results for the user's latest message, best first; you may call "
         "tools for anything else):\n" + json.dumps(rows, ensure_ascii=False)
         + (f"\nUser's bank cards: {', '.join(cards)}" if cards else "")
         + f"\nKarachi time now: {local_now().strftime('%a %H:%M')}"
@@ -446,7 +579,10 @@ async def respond(ctx: AuthContext, messages: list[dict], *, lat: float | None,
             if grounded:
                 reply, source = grounded, "model"
     if not reply:
-        reply = template_reply(rows, roman)
+        if menu is not None and focus:
+            reply = menu_reply(focus["name"], menu.get("items") or [], roman)
+        else:
+            reply = template_reply(rows, roman)
 
     # The cards: venues the reply names, in the order it names them, then the top results.
     # Only venues a tool returned can appear here, whatever the text says.

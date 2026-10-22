@@ -37,6 +37,7 @@ from .routers import (
     health,
     ingest,
     live,
+    menu,
     owner,
     search,
     staff,
@@ -168,6 +169,8 @@ app.include_router(camera.owner_router)
 app.include_router(camera.router)
 app.include_router(camera.public_router)
 app.include_router(camera.admin_router)
+app.include_router(menu.owner_router)
+app.include_router(menu.public_router)
 app.include_router(forecast.router)
 app.include_router(deals.router)
 app.include_router(chat.router)

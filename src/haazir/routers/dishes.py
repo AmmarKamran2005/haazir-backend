@@ -25,6 +25,7 @@ from sqlalchemy import text
 
 from ..auth.deps import Ctx
 from ..schemas.venue import PriceComparison, PriceQuote
+from ..services import portion
 from ..services.normalise import canonicalise_dish
 
 router = APIRouter(prefix="/v1/dishes", tags=["dishes"])
@@ -78,6 +79,7 @@ async def dish_prices(
                 f"""
                 SELECT v.id AS venue_id, v.slug, v.name AS venue_name, a.name AS area,
                        vd.menu_name, vd.price_pkr, vd.price_unit, vd.price_seen_at,
+                       vd.portion, vd.description,
                        d.protein, {distance} AS distance_m
                   FROM venue_dish vd
                   JOIN dish d ON d.id = vd.dish_id
@@ -106,6 +108,8 @@ async def dish_prices(
                 protein=r["protein"],
                 price_pkr=r["price_pkr"],
                 price_unit=r["price_unit"],
+                portion=portion.label(r["portion"], r["price_unit"], r["menu_name"],
+                                      r["description"]),
                 price_seen_at=r["price_seen_at"],
                 price_age_days=age,
                 stale=age is not None and age > STALE_AFTER_DAYS,

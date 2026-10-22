@@ -63,7 +63,8 @@ def _cacheable_caller(request: Request) -> bool:
 
 def invalidate_venues() -> None:
     """Drop every cached per-venue read. Called when any venue publishes a live change."""
-    for key in [k for k in _store if k.startswith("/v1/venues/")]:
+    # Dish prices too: an owner's menu edit is a write like any other.
+    for key in [k for k in _store if k.startswith(("/v1/venues/", "/v1/dishes/"))]:
         _store.pop(key, None)
 
 

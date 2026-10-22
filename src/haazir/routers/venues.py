@@ -20,6 +20,7 @@ from sqlalchemy import text
 from ..auth.deps import Ctx
 from ..estimator.fusion import SIGMA_REF
 from ..schemas.venue import AreaRef, DishLine, OccupancySummary, VenueCard, VenueDishes
+from ..services import portion
 from ..services.clock import HOUR_OF_WEEK_SQL
 
 router = APIRouter(prefix="/v1/venues", tags=["venues"])
@@ -207,6 +208,9 @@ async def venue_card(ident: str, ctx: Ctx) -> VenueCard:
     from ..services import deals
 
     card.deals = (await deals.for_venues(ctx.session, [card.id])).get(card.id, [])
+    from .menu import live_offers
+
+    card.offers = await live_offers(ctx.session, card.id)
     return card
 
 
@@ -222,7 +226,7 @@ async def venue_dishes(
                 """
                 SELECT vd.dish_id, d.canonical_name, d.family, d.protein,
                        vd.menu_name, vd.section, vd.description, vd.price_pkr,
-                       vd.price_unit, vd.price_seen_at, vd.is_signature,
+                       vd.price_unit, vd.portion, vd.price_seen_at, vd.is_signature,
                        vd.sold_out_until, vd.quality_mean
                   FROM venue_dish vd
                   JOIN dish d ON d.id = vd.dish_id
@@ -247,6 +251,8 @@ async def venue_dishes(
             description=r["description"],
             price_pkr=r["price_pkr"],
             price_unit=r["price_unit"],
+            portion=portion.label(r["portion"], r["price_unit"], r["menu_name"],
+                                  r["description"]),
             price_seen_at=r["price_seen_at"],
             price_age_days=(now - r["price_seen_at"]).days if r["price_seen_at"] else None,
             is_signature=r["is_signature"],

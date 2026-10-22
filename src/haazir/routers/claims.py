@@ -67,6 +67,13 @@ def _claim(row) -> dict:
         data["venue_id"] = str(data["venue_id"])
     if isinstance(data.get("new_venue"), str):
         data["new_venue"] = json.loads(data["new_venue"])
+    nv = data.get("new_venue") or {}
+    # The panel's names for the same facts.
+    data["kind"] = "new" if nv else "existing"
+    data["decision_note"] = data.get("note")
+    data["venue_name"] = data.get("venue_name") or nv.get("name")
+    data["address"] = nv.get("address")
+    data["phone"] = nv.get("phone")
     return data
 
 

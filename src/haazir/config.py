@@ -122,6 +122,8 @@ class Settings(BaseSettings):
     llm_monthly_ceiling_usd: float = 25.0
     # The chat agent's model. Empty means the explanation model in services/llm.py.
     gemini_chat_model: str = ""
+    # The model chain every call walks (services/llm.py). Empty means the built-in default.
+    gemini_models: str = ""
 
     # ── routing ───────────────────────────────────────────────────────────────
     osrm_url: str = ""

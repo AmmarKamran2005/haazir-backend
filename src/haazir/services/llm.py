@@ -24,10 +24,12 @@ round trip on every explanation to keep a number that only has to be roughly rig
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import hashlib
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 
 import httpx
@@ -214,49 +216,19 @@ async def _call(
     model: str, system: str, prompt: str, max_tokens: int = 160,
     timeout: httpx.Timeout | None = None,
 ) -> str | None:
-    """One request. Returns None on any failure; the caller already has a template."""
-    if not settings.gemini_api_key:
-        return None
-    try:
-        async with httpx.AsyncClient(timeout=timeout or _TIMEOUT) as client:
-            response = await client.post(
-                GEMINI_URL.format(model=model),
-                headers={
-                    "x-goog-api-key": settings.gemini_api_key,
-                    "content-type": "application/json",
-                },
-                json={
-                    "system_instruction": {"parts": [{"text": system}]},
-                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                    "generationConfig": {"maxOutputTokens": max_tokens},
-                },
-            )
-        if response.status_code != 200:
-            log.warning("Gemini returned %s: %s", response.status_code, response.text[:200])
-            return None
-
-        payload = response.json()
-        usage = payload.get("usageMetadata", {})
-        # `candidatesTokenCount` excludes thinking tokens, which are billed as output. The
-        # chosen model does not think, so the two agree; the max keeps the guard honest if a
-        # model that does is ever configured here.
-        out = max(
-            usage.get("candidatesTokenCount", 0),
-            usage.get("totalTokenCount", 0) - usage.get("promptTokenCount", 0),
-        )
-        budget.record(model, usage.get("promptTokenCount", 0), out)
-
-        candidates = payload.get("candidates") or []
-        if not candidates:
-            # A safety block or a filtered response arrives this way, with no error status.
-            log.warning("Gemini returned no candidate: %s", str(payload)[:200])
-            return None
-        parts = candidates[0].get("content", {}).get("parts") or []
-        text = "".join(p.get("text", "") for p in parts if "text" in p)
-        return text.strip() or None
-    except (httpx.HTTPError, ValueError, KeyError) as exc:
-        log.warning("Gemini unreachable, using the template: %s", exc)
-        return None
+    """One request through the model chain, `model` tried first. None on any failure; the
+    caller already has a template."""
+    seconds = (timeout.read if isinstance(timeout, httpx.Timeout) and timeout.read
+               else _TIMEOUT.read)
+    payload = await call_raw(
+        {
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": max_tokens},
+        },
+        model=model, timeout=float(seconds),
+    )
+    return text_of(payload).strip() or None
 
 
 # --- intent, when the deterministic passes found nothing ----------------------
@@ -447,74 +419,115 @@ async def answer(query: str | None, rows: list[dict], party: int = 1) -> tuple[s
     return text_, "model"
 
 
-# --- raw calls, for the chat agent and Ghar ----------------------------------
+# --- raw calls, through a chain of models ------------------------------------
 
-# Chosen by env so a stronger model can be tried without a deploy of code. The default is the
-# one measured above; function calling works on it at the same latency as on 3.5-flash.
-MODEL_CHAT = settings.gemini_chat_model or MODEL_EXPLAIN
-PRICE_PER_MTOK.setdefault(MODEL_CHAT, {"in": 0.30, "out": 2.50})
-MODEL_FALLBACK = "gemini-3.5-flash-lite"
-PRICE_PER_MTOK.setdefault(MODEL_FALLBACK, {"in": 0.10, "out": 0.40})
+# Any one Gemini model is regularly "experiencing high demand" (503) or simply slow for
+# minutes at a time; on 22 Oct three of the five models this key can use were failing while
+# the other two answered in a second and a half. So every call walks a chain, gives each
+# model a short leash, and benches a failing one for a minute so the next call goes straight
+# to one that works. The chain is env-configurable (GEMINI_MODELS, comma separated, names as
+# ListModels prints them); GEMINI_CHAT_MODEL, if set, goes first.
+DEFAULT_CHAIN = (
+    "gemini-3.5-flash,gemini-3.6-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite,"
+    "gemini-flash-latest"
+)
+MODEL_CHAIN: list[str] = list(dict.fromkeys(
+    m.strip()
+    for m in [settings.gemini_chat_model, *(settings.gemini_models or DEFAULT_CHAIN).split(",")]
+    if m and m.strip()
+))
+MODEL_CHAT = MODEL_CHAIN[0]
+for _m in MODEL_CHAIN:
+    PRICE_PER_MTOK.setdefault(_m, {"in": 0.30, "out": 2.50})
+
+ATTEMPT_TIMEOUT_S = 5.0
+BENCH_S = 60.0
+_benched: dict[str, float] = {}
+
+
+def _order(preferred: str | None) -> list[str]:
+    chain = list(dict.fromkeys([m for m in [preferred, *MODEL_CHAIN] if m]))
+    now = time.monotonic()
+    ready = [m for m in chain if _benched.get(m, 0) <= now]
+    # If everything is benched, try them all anyway: a benched model beats no answer.
+    return ready or chain
+
+
+def _thinking(model: str) -> dict:
+    # The 3.1 and 2.5 models take a budget of zero; 3.5 and later refuse it and take a level.
+    return ({"thinkingBudget": 0} if model.startswith(("gemini-3.1", "gemini-2.5"))
+            else {"thinkingLevel": "low"})
+
+
+def _without_signatures(body: dict) -> dict:
+    """Thought signatures are bound to the model that wrote them; another model refuses a
+    conversation carrying them."""
+    return {**body, "contents": [
+        {**c, "parts": [{k: v for k, v in p.items() if k != "thoughtSignature"}
+                        for p in c.get("parts", [])]}
+        for c in body.get("contents", [])
+    ]}
 
 
 async def call_raw(
     body: dict, *, model: str | None = None, timeout: float = 8.0
 ) -> dict | None:
-    """One `generateContent` with a caller-built body. The parsed response, or None.
+    """One `generateContent` with a caller-built body, through the model chain.
 
-    Thinking is switched off unless the caller asks: every caller here rewords or selects from
-    facts already fetched, and a thinking budget is latency the diner sits through. The spend
-    is recorded against the same monthly guard as everything else.
+    `model` is tried first (the chat passes the model that produced the previous turn, whose
+    thought signatures are in the body). The parsed response carries `_model`, the model that
+    answered, or None when every model failed inside `timeout` plus a little grace. Thinking is
+    switched off unless the caller asks. Spend is recorded against the monthly guard.
     """
     if not available():
         return None
-    model = model or MODEL_CHAT
-    sent = {**body, "generationConfig": dict(body.get("generationConfig") or {})}
-    # The 3.1 and 2.5 models take a budget of zero; 3.5 and later refuse it and take a level.
-    sent["generationConfig"].setdefault(
-        "thinkingConfig",
-        {"thinkingBudget": 0} if model.startswith(("gemini-3.1", "gemini-2.5"))
-        else {"thinkingLevel": "low"},
-    )
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=3.0)) as client:
-            response = await client.post(
-                GEMINI_URL.format(model=model),
-                headers={"x-goog-api-key": settings.gemini_api_key,
-                         "content-type": "application/json"},
-                json=sent,
-            )
-    except httpx.HTTPError as exc:
-        log.warning("Gemini unreachable: %s", exc)
-        return None
-    if response.status_code == 503 and model != MODEL_FALLBACK:
-        # "High demand" on one model is common and brief; a sibling usually answers.
-        log.info("Gemini %s overloaded, retrying on %s", model, MODEL_FALLBACK)
-        # Thought signatures are bound to the model that wrote them; another model refuses a
-        # conversation carrying them.
-        stripped = {**body, "contents": [
-            {**c, "parts": [{k: v for k, v in p.items() if k != "thoughtSignature"}
-                            for p in c.get("parts", [])]}
-            for c in body.get("contents", [])
-        ]}
-        return await call_raw(stripped, model=MODEL_FALLBACK, timeout=timeout)
-    if response.status_code != 200:
-        log.warning("Gemini returned %s: %s", response.status_code, response.text[:200])
-        return None
-    try:
-        payload = response.json()
-    except ValueError:
-        return None
-    usage = payload.get("usageMetadata", {})
-    budget.record(
-        model, usage.get("promptTokenCount", 0),
-        max(usage.get("candidatesTokenCount", 0),
-            usage.get("totalTokenCount", 0) - usage.get("promptTokenCount", 0)),
-    )
-    if not payload.get("candidates"):
-        log.warning("Gemini returned no candidate: %s", str(payload)[:200])
-        return None
-    return payload
+    deadline = time.monotonic() + timeout + 4.0
+    for attempt, m in enumerate(_order(model)):
+        remaining = deadline - time.monotonic()
+        if remaining < 1.0:
+            break
+        if attempt:
+            await asyncio.sleep(min(0.3 * attempt, 1.0))
+        sent = body if (model and m == model) else _without_signatures(body)
+        sent = {**sent, "generationConfig": dict(sent.get("generationConfig") or {})}
+        sent["generationConfig"].setdefault("thinkingConfig", _thinking(m))
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(min(ATTEMPT_TIMEOUT_S, remaining), connect=3.0)
+            ) as client:
+                response = await client.post(
+                    GEMINI_URL.format(model=m),
+                    headers={"x-goog-api-key": settings.gemini_api_key,
+                             "content-type": "application/json"},
+                    json=sent,
+                )
+        except httpx.HTTPError as exc:
+            log.info("Gemini %s unreachable (%s); trying the next model", m, type(exc).__name__)
+            _benched[m] = time.monotonic() + BENCH_S
+            continue
+        if response.status_code != 200:
+            log.info("Gemini %s returned %s; trying the next model", m, response.status_code)
+            if response.status_code in (429, 500, 503, 504, 404):
+                _benched[m] = time.monotonic() + BENCH_S
+            continue
+        try:
+            payload = response.json()
+        except ValueError:
+            continue
+        usage = payload.get("usageMetadata", {})
+        budget.record(
+            m, usage.get("promptTokenCount", 0),
+            max(usage.get("candidatesTokenCount", 0),
+                usage.get("totalTokenCount", 0) - usage.get("promptTokenCount", 0)),
+        )
+        if not payload.get("candidates"):
+            # A safety block arrives this way; another model will not judge it differently.
+            log.warning("Gemini returned no candidate: %s", str(payload)[:200])
+            return None
+        payload["_model"] = m
+        return payload
+    log.warning("every Gemini model failed; the template answers")
+    return None
 
 
 def text_of(payload: dict | None) -> str:

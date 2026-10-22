@@ -24,6 +24,9 @@ class ChatIn(BaseModel):
     lng: float | None = Field(default=None, ge=-180, le=180)
     area: str | None = Field(default=None, max_length=60)
     cards: list[str] = Field(default_factory=list, max_length=8)
+    # The venue the user is looking at (its page's chat), slug or id. Optional: without it
+    # the conversation's last-named venue is what "yahan" and "is ka menu" refer to.
+    venue: str | None = Field(default=None, max_length=120)
 
 
 @router.post("/chat")
@@ -32,5 +35,6 @@ async def chat_turn(body: ChatIn, ctx: Ctx) -> dict:
     if messages[-1]["role"] != "user":
         messages.append({"role": "user", "content": "?"})
     return await chat.respond(
-        ctx, messages, lat=body.lat, lng=body.lng, area=body.area, cards=body.cards
+        ctx, messages, lat=body.lat, lng=body.lng, area=body.area, cards=body.cards,
+        venue=body.venue,
     )

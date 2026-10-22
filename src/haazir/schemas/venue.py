@@ -90,6 +90,9 @@ class VenueCard(BaseModel):
     trust_components: list[TrustComponent] | None = None
     live: OccupancySummary | None = None
     deals: list[CardDeal] = Field(default_factory=list)
+    # The venue's own time-boxed offers, set by its owner: {id, title, discount_pct, days,
+    # start_hour, end_hour, valid_until, active}.
+    offers: list[dict] = Field(default_factory=list)
 
 
 class DishLine(BaseModel):
@@ -102,6 +105,7 @@ class DishLine(BaseModel):
     description: str | None = None
     price_pkr: int | None = None
     price_unit: str
+    portion: str | None = None
     price_seen_at: dt.datetime | None = None
     price_age_days: int | None = None
     is_signature: bool = False
@@ -127,6 +131,7 @@ class PriceQuote(BaseModel):
     protein: str | None = None
     price_pkr: int
     price_unit: str
+    portion: str | None = None
     price_seen_at: dt.datetime | None = None
     price_age_days: int | None = None
     stale: bool = Field(
