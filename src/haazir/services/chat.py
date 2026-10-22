@@ -513,9 +513,24 @@ async def focus_venue(ctx: AuthContext, messages: list[dict],
         if vid:
             return await _venue_brief(ctx, vid)
     for m in reversed(messages[-10:-1]):
-        ids = await names.venues_named_in(ctx.session, m["content"][:280], limit=1)
-        if ids:
+        content = m["content"][:600]
+        ids = await names.venues_named_in(ctx.session, content[:280], limit=5)
+        if not ids:
+            continue
+        if m["role"] == "user":
             return await _venue_brief(ctx, ids[0])
+        # A reply is long and full of area and cuisine words, so a loose match on it finds
+        # "China Beijing Beauty Parlour Clifton" for a sentence about China Town in Clifton.
+        # From a reply, only a venue whose whole name is in the text counts.
+        found = await ctx.session.execute(
+            text("SELECT id, name FROM venue WHERE id = ANY(CAST(:ids AS uuid[]))"),
+            {"ids": [str(i) for i in ids]},
+        )
+        lowered = content.lower()
+        exact = sorted((r for r in found.all() if r[1].lower() in lowered),
+                       key=lambda r: lowered.index(r[1].lower()))
+        if exact:
+            return await _venue_brief(ctx, exact[0][0])
     return None
 
 
