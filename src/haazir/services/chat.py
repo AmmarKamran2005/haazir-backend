@@ -505,6 +505,9 @@ async def focus_venue(ctx: AuthContext, messages: list[dict],
             return await _venue_brief(ctx, vid)
     # The question itself first ("China Town ka menu"), then the cards the app showed with the
     # last answer, then whatever the conversation named most recently.
+    exact = await named_exactly(ctx, messages[-1]["content"])
+    if exact:
+        return await _venue_brief(ctx, exact)
     ids = await names.venues_named_in(ctx.session, messages[-1]["content"][:280], limit=1)
     if ids:
         return await _venue_brief(ctx, ids[0])
@@ -532,6 +535,34 @@ async def focus_venue(ctx: AuthContext, messages: list[dict],
         if exact:
             return await _venue_brief(ctx, exact[0][0])
     return None
+
+
+async def named_exactly(ctx: AuthContext, question: str):
+    """A venue whose whole name, branch suffix aside, is in the question; the longest wins.
+
+    The word-rarity match in services/names.py skips common words, so "Allah Wala Biryani"
+    (three words that each appear in dozens of names) matched nothing and the chat said the
+    hero venue did not exist. A full-name containment test has no such blind spot.
+    """
+    row = (
+        await ctx.session.execute(
+            text(
+                r"""
+                SELECT id FROM (
+                    SELECT v.id, v.google_review_count,
+                           lower(trim(regexp_replace(v.name, '\s*[-|(,].*$', ''))) AS base
+                      FROM venue v WHERE v.status = 'active'
+                ) x
+                 WHERE length(base) >= 8 AND position(' ' IN base) > 0
+                   AND position(base IN lower(:q)) > 0
+                 ORDER BY length(base) DESC, google_review_count DESC NULLS LAST
+                 LIMIT 1
+                """
+            ),
+            {"q": question[:400]},
+        )
+    ).first()
+    return row[0] if row else None
 
 
 async def _venue_brief(ctx: AuthContext, venue_id) -> dict | None:
@@ -572,8 +603,11 @@ async def respond(ctx: AuthContext, messages: list[dict], *, lat: float | None,
     # Town ka menu") or is too short to be a new search ("menu btao"); "Bahadurabad mein
     # biryani kitne ki" is a new search and keeps the normal path.
     named_now = bool(focus) and focus["name"].lower().split(" ")[0] in question.lower()
+    # "Allah Wala Biryani abhi jana theek rahega?" is a question about that venue, not a
+    # search that may or may not rank it.
+    asked_by_name = bool(focus) and (await named_exactly(ctx, question)) is not None
     about_focus = bool(focus) and (
-        refers_back(question) or venue is not None
+        refers_back(question) or venue is not None or asked_by_name
         or (asks_menu and (named_now or len(question.split()) <= 5))
     )
 
