@@ -19,7 +19,14 @@ from sqlalchemy import text
 
 from ..auth.deps import Ctx
 from ..estimator.fusion import SIGMA_REF
-from ..schemas.venue import AreaRef, DishLine, OccupancySummary, VenueCard, VenueDishes
+from ..schemas.venue import (
+    AreaRef,
+    CardDeal,
+    DishLine,
+    OccupancySummary,
+    VenueCard,
+    VenueDishes,
+)
 from ..services import portion
 from ..services.clock import HOUR_OF_WEEK_SQL
 
@@ -207,7 +214,10 @@ async def venue_card(ident: str, ctx: Ctx) -> VenueCard:
         card.live = await _prior_occupancy(ctx, card.id)
     from ..services import deals
 
-    card.deals = (await deals.for_venues(ctx.session, [card.id])).get(card.id, [])
+    # Built as models, not left as dicts: assignment is not validated, and a dict in a
+    # typed list breaks every caller that reads `.bank` (the chat did, silently).
+    card.deals = [CardDeal(**d) for d in
+                  (await deals.for_venues(ctx.session, [card.id])).get(card.id, [])]
     from .menu import live_offers
 
     card.offers = await live_offers(ctx.session, card.id)

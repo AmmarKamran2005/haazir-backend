@@ -429,7 +429,7 @@ async def answer(query: str | None, rows: list[dict], party: int = 1) -> tuple[s
 # ListModels prints them); GEMINI_CHAT_MODEL, if set, goes first.
 DEFAULT_CHAIN = (
     "gemini-3.5-flash,gemini-3.6-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite,"
-    "gemini-flash-latest"
+    "gemini-flash-latest,gemma-4-26b-a4b-it"
 )
 MODEL_CHAIN: list[str] = list(dict.fromkeys(
     m.strip()
@@ -490,7 +490,15 @@ async def call_raw(
             await asyncio.sleep(min(0.3 * attempt, 1.0))
         sent = body if (model and m == model) else _without_signatures(body)
         sent = {**sent, "generationConfig": dict(sent.get("generationConfig") or {})}
-        sent["generationConfig"].setdefault("thinkingConfig", _thinking(m))
+        if m.startswith("gemma"):
+            # The last resort, on a separate quota: no tool calling (it hangs on tools) and no
+            # thinking setting, and room for the reasoning it writes before the answer. The
+            # caller's context already carries the facts a tool would have fetched.
+            sent.pop("tools", None)
+            sent["generationConfig"]["maxOutputTokens"] = max(
+                1500, sent["generationConfig"].get("maxOutputTokens", 0))
+        else:
+            sent["generationConfig"].setdefault("thinkingConfig", _thinking(m))
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(min(ATTEMPT_TIMEOUT_S, remaining), connect=3.0)

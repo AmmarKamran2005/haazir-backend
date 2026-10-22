@@ -139,6 +139,7 @@ _ROMAN_URDU = {
     "mein", "main", "hai", "hain", "kya", "abhi", "khana", "log", "tak", "koi", "acha", "achi",
     "kahan", "chahiye", "batao", "kaun", "sasta", "wala", "wali", "ke", "ki", "ka", "aur",
     "jagah", "khali", "kitna", "kitne", "bhai", "yaar", "raat", "dopahar",
+    "yahan", "wahan", "btao", "bta", "theek", "rahega", "jana", "hoga", "kab", "kaisa",
 }
 
 
@@ -505,18 +506,20 @@ async def focus_venue(ctx: AuthContext, messages: list[dict],
             return await _venue_brief(ctx, vid)
     # The question itself first ("China Town ka menu"), then the cards the app showed with the
     # last answer, then whatever the conversation named most recently.
+    # Only an exact name counts in the question itself: a loose word match on "Yahan ka menu
+    # btao" finds some venue with one of those words in its name, which is never the point.
     exact = await named_exactly(ctx, messages[-1]["content"])
     if exact:
         return await _venue_brief(ctx, exact)
-    ids = await names.venues_named_in(ctx.session, messages[-1]["content"][:280], limit=1)
-    if ids:
-        return await _venue_brief(ctx, ids[0])
     for ident in (on_screen or [])[:5]:
         vid = await lookup.venue_id_for(ctx.session, ident)
         if vid:
             return await _venue_brief(ctx, vid)
     for m in reversed(messages[-10:-1]):
         content = m["content"][:600]
+        exact = await named_exactly(ctx, content)
+        if exact:
+            return await _venue_brief(ctx, exact)
         ids = await names.venues_named_in(ctx.session, content[:280], limit=5)
         if not ids:
             continue
