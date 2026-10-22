@@ -202,7 +202,8 @@ def fallback_plan(body: MealPlanIn, start: dt.date) -> dict:
         mains = [m for m in ("lunch", "dinner") if m in body.meals]
         for j, meal in enumerate(mains):
             planned[meal] = rotation[(len(mains) * i + j) % len(rotation)]
-        day = {"date": (start + dt.timedelta(days=i)).isoformat(), "lunch": "", "dinner": "",
+        # A meal that was not asked for is null; older apps always ask for lunch and dinner.
+        day = {"date": (start + dt.timedelta(days=i)).isoformat(), "lunch": None, "dinner": None,
                "notes": "Cook dinner's masala at lunch to save gas." if body.gas_hours else ""}
         for meal, (name, ingredients) in planned.items():
             day[meal] = name
@@ -235,11 +236,12 @@ def complete_grocery(data: dict, body: MealPlanIn) -> dict:
                if not any(word in named for word in STAPLE_WORDS[k[0]])}
     data["grocery"] = grocery + grocery_lines(missing, body.pantry)
     for day in data.get("days") or []:
-        day.setdefault("lunch", "")
-        day.setdefault("dinner", "")
-        day.setdefault("notes", "")
+        for meal in ("breakfast", "lunch", "dinner"):
+            if meal not in body.meals or not day.get(meal):
+                day[meal] = None
         if "breakfast" not in body.meals:
             day.pop("breakfast", None)
+        day.setdefault("notes", "")
     data.setdefault("tips", [])
     return data
 
@@ -397,7 +399,7 @@ _PLAN_SYSTEM = (
     "You plan home meals for a Karachi household. Return JSON only, shaped exactly as "
     '{"days":[{"date":"YYYY-MM-DD","breakfast":str,"lunch":str,"dinner":str,"notes":str}],'
     '"grocery":[{"item":str,"qty":number,"unit":str,"est_pkr":int,"when":"Week N"}],'
-    '"tips":[str]}. Plan only the meals listed in MEALS; use "" for any other meal. Ordinary '
+    '"tips":[str]}. Plan only the meals listed in MEALS; use null for any other meal. Ordinary '
     "Pakistani home cooking and realistic Karachi prices in PKR. The grocery list MUST "
     "include household staples scaled to people and days (sugar, tea leaves, milk, cooking "
     "oil, atta, rice, daal, salt, spices, onion, tomato, garlic-ginger, eggs if eaten) as well "

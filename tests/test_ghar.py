@@ -95,7 +95,7 @@ def test_breakfast_is_planned_when_asked_and_staples_are_on_the_list():
 
 def test_lunch_only_still_has_the_old_keys():
     out = fallback_plan(MealPlanIn(people=2, days=7, meals=["lunch"]), dt.date(2026, 10, 25))
-    assert all(d["lunch"] and d["dinner"] == "" and "breakfast" not in d for d in out["days"])
+    assert all(d["lunch"] and d["dinner"] is None and "breakfast" not in d for d in out["days"])
 
 
 def test_a_model_plan_gets_its_missing_staples():
