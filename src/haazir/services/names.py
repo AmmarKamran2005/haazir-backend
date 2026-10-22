@@ -25,6 +25,13 @@ _FILLER = {
     "mein", "main", "kuch", "khana", "khaana", "wala", "wali", "wale", "abhi", "hai", "hain",
     "chahiye", "jana", "jaana", "kahan", "kaha", "aur", "log", "tak", "min", "minute",
     "restaurant", "cafe", "food", "place",
+    # Everyday words of a search sentence. Matched as substrings of names, "khali" (free)
+    # found Khalid Sweets and S. Abdul Khaliq for "abhi khali biryani", ahead of any biryani.
+    "khali", "khaali", "rush", "sasta", "sasti", "saste", "acha", "achi", "accha", "achha",
+    "kitna", "kitne", "kitni", "theek", "thik", "rahega", "batao", "btao", "bta", "yahan",
+    "wahan", "menu", "card", "deal", "deals", "free", "busy", "full", "wait", "people",
+    "family", "raat", "din", "dopahar", "lunch", "dinner", "nashta", "jagah", "mujhe",
+    "koi", "saath", "sath", "hoga", "hogi", "kaisa", "kaisi", "price", "rate",
 }
 
 
