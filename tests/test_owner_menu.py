@@ -38,6 +38,9 @@ async def test_an_owner_dish_and_offer_are_public(client, venue_factory, user_fa
     cmp = (await client.get("/v1/dishes/compare",
                             params={"dish": "lotus cake", "venues": str(venue_id)})).json()
     assert cmp["count"] == 2 and cmp["results"][0]["portion"] == "1 pound"
+    prices = (await client.get("/v1/dishes/lotus cake/prices",
+                               params={"venues": str(venue_id)})).json()
+    assert {q["portion"] for q in prices["quotes"]} == {"1 pound", "2 pound"}
     near = (await client.get("/v1/dishes/compare",
                              params={"dish": "lotus cake", "lat": 24.8615, "lng": 67.0180})).json()
     assert near["results"][0]["distance_m"] is not None

@@ -52,3 +52,8 @@ def test_the_menu_template_quotes_price_and_portion():
     ], roman=True)
     assert "Chicken Manchurian Rs 1,250 (half)" in text and "Egg fried rice Rs 800" in text
     assert "nahi hai" in chat.menu_reply("China Town", [], roman=True)
+
+
+def test_serving_words_are_not_part_of_the_dish():
+    assert portion.strip_serving("Lotus cake 1 pound") == "lotus cake"
+    assert portion.strip_serving("Mutton Karahi (Half)") == "mutton karahi"

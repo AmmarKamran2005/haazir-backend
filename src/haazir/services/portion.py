@@ -60,3 +60,14 @@ def label(portion: str | None, price_unit: str | None, name: str | None,
     if parsed:
         return parsed
     return UNIT_LABELS.get(price_unit or "")
+
+
+def strip_serving(name: str) -> str:
+    """The name without its serving words, for finding the dish family: "Lotus cake 1 pound"
+    is a lotus cake. Falls back to the name when stripping would leave nothing."""
+    s = name.lower()
+    for pattern, _label in _PATTERNS:
+        s = pattern.sub(" ", s)
+    s = re.sub(r"[()\[\]]", " ", s)
+    s = " ".join(s.split())
+    return s or name

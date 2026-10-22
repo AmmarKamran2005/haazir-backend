@@ -46,6 +46,8 @@ async def dish_prices(
     lng: float | None = Query(default=None, ge=-180, le=180),
     radius_m: int = Query(default=5000, ge=200, le=40_000),
     limit: int = Query(default=60, ge=1, le=200),
+    venues: str | None = Query(
+        default=None, description="comma-separated ids or slugs (up to 20): exactly these"),
 ) -> PriceComparison:
     """Prices for one dish family across venues, with the median."""
     # The caller may pass a printed name ("Beef Bihari Boti") or a family ("bihari boti").
@@ -65,13 +67,27 @@ async def dish_prices(
         where.append("v.area_id = :area_id")
         params["area_id"] = area_id
 
+    # The venues the diner picked, wherever they are: no area, no radius.
+    picked: list[str] = []
+    if venues:
+        from ..services import lookup
+
+        for ident in [v.strip() for v in venues.split(",") if v.strip()][:20]:
+            vid = await lookup.venue_id_for(ctx.session, ident)
+            if vid:
+                picked.append(str(vid))
+        where.append("v.id = ANY(CAST(:picked AS uuid[]))")
+        params["picked"] = picked
+
     distance = "NULL::float8"
     if lat is not None and lng is not None:
         distance = (
             "ST_Distance(v.geom, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography)"
         )
-        where.append(f"{distance} <= :radius")
-        params |= {"lat": lat, "lng": lng, "radius": radius_m}
+        params |= {"lat": lat, "lng": lng}
+        if not venues:
+            where.append(f"{distance} <= :radius")
+            params["radius"] = radius_m
 
     rows = (
         await ctx.session.execute(

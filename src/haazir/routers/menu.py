@@ -106,7 +106,7 @@ async def _owned_venue(ctx: Ctx, venue_id: uuid.UUID, principal) -> None:
 async def _dish_row(session: AsyncSession, venue_id: uuid.UUID, name: str,
                     portion_label: str | None) -> tuple[uuid.UUID, str | None]:
     """The dish row for a new menu line: canonical, or a variant if the venue has it already."""
-    parsed = canonicalise_dish(name)
+    parsed = canonicalise_dish(portion.strip_serving(name)) or canonicalise_dish(name)
     if parsed is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="That dish name has no recognisable words.")

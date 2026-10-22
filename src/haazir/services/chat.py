@@ -26,6 +26,8 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 
+from sqlalchemy import text
+
 from ..auth.deps import AuthContext
 from . import deals as deals_service
 from . import intent as intent_service
@@ -182,6 +184,7 @@ class Agent:
         self.cards = cards
         self.seen: dict[str, dict] = {}  # slug -> compact row, in the order first returned
         self.dishes: list[dict] = []
+        self.menus: list[dict] = []
         self.tool_calls: list[str] = []
 
     # --- tools -----------------------------------------------------------
@@ -280,6 +283,17 @@ class Agent:
         items = [{"name": m["menu_name"], "section": m["section"], "price_pkr": m["price_pkr"],
                   "portion": m["portion"], "sold_out": m["sold_out"]} for m in priced[:30]]
         self.dishes = [{"slug": slug, **i} for i in items]
+        brief = await self.ctx.session.execute(
+            text("SELECT v.id, v.slug, v.name, a.name AS area FROM venue v "
+                 "LEFT JOIN area a ON a.id = v.area_id WHERE v.id = :v"), {"v": venue_id})
+        v = brief.mappings().one()
+        self.menus.append({
+            "venue": {"id": str(v["id"]), "slug": v["slug"], "name": v["name"],
+                      "area": v["area"]},
+            "items": [{"dish_id": m["dish_id"], "name": m["menu_name"], "portion": m["portion"],
+                       "price_pkr": m["price_pkr"], "section": m["section"]}
+                      for m in priced[:30] if m["price_pkr"]],
+        })
         return {"slug": slug, "items": items, "count": len(menu),
                 "note": None if menu else "No menu has been published for this venue yet."}
 
@@ -479,7 +493,8 @@ def refers_back(text: str) -> bool:
 
 
 async def focus_venue(ctx: AuthContext, messages: list[dict],
-                      explicit: str | None = None) -> dict | None:
+                      explicit: str | None = None,
+                      on_screen: list[str] | None = None) -> dict | None:
     """The venue the conversation is about: the one the client names, else the most recent
     one named in the conversation, this message included."""
     from . import names
@@ -488,7 +503,16 @@ async def focus_venue(ctx: AuthContext, messages: list[dict],
         vid = await lookup.venue_id_for(ctx.session, explicit)
         if vid:
             return await _venue_brief(ctx, vid)
-    for m in reversed(messages[-10:]):
+    # The question itself first ("China Town ka menu"), then the cards the app showed with the
+    # last answer, then whatever the conversation named most recently.
+    ids = await names.venues_named_in(ctx.session, messages[-1]["content"][:280], limit=1)
+    if ids:
+        return await _venue_brief(ctx, ids[0])
+    for ident in (on_screen or [])[:5]:
+        vid = await lookup.venue_id_for(ctx.session, ident)
+        if vid:
+            return await _venue_brief(ctx, vid)
+    for m in reversed(messages[-10:-1]):
         ids = await names.venues_named_in(ctx.session, m["content"][:280], limit=1)
         if ids:
             return await _venue_brief(ctx, ids[0])
@@ -516,7 +540,7 @@ async def _venue_brief(ctx: AuthContext, venue_id) -> dict | None:
 
 async def respond(ctx: AuthContext, messages: list[dict], *, lat: float | None,
                   lng: float | None, area: str | None, cards: list[str],
-                  venue: str | None = None) -> dict:
+                  venue: str | None = None, context_venues: list[str] | None = None) -> dict:
     question = messages[-1]["content"]
     roman = is_roman_urdu(question)
     cards = [deals_service.canonical_bank(c) for c in cards if c] or banks_in(question)
@@ -524,7 +548,7 @@ async def respond(ctx: AuthContext, messages: list[dict], *, lat: float | None,
 
     focus = None
     try:
-        focus = await focus_venue(ctx, messages, venue)
+        focus = await focus_venue(ctx, messages, venue, context_venues)
     except Exception as exc:  # noqa: BLE001
         log.warning("chat focus lookup failed: %s", exc)
     asks_menu = is_menu_question(question)
@@ -604,6 +628,7 @@ async def respond(ctx: AuthContext, messages: list[dict], *, lat: float | None,
         "reply": reply,
         "venues": [c.model_dump(mode="json") for c in cards_out],
         "dishes": agent.dishes or None,
+        "menus": agent.menus or None,
         "sources": sources or None,
         "suggestions": suggestions(roman, bool(cards_out)),
         "reply_source": source,

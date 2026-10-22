@@ -27,6 +27,8 @@ class ChatIn(BaseModel):
     # The venue the user is looking at (its page's chat), slug or id. Optional: without it
     # the conversation's last-named venue is what "yahan" and "is ka menu" refer to.
     venue: str | None = Field(default=None, max_length=120)
+    # The venues shown with the last answer, most recent first: what "yahan" can point at.
+    context_venues: list[str] = Field(default_factory=list, max_length=10)
 
 
 @router.post("/chat")
@@ -36,5 +38,5 @@ async def chat_turn(body: ChatIn, ctx: Ctx) -> dict:
         messages.append({"role": "user", "content": "?"})
     return await chat.respond(
         ctx, messages, lat=body.lat, lng=body.lng, area=body.area, cards=body.cards,
-        venue=body.venue,
+        venue=body.venue, context_venues=body.context_venues,
     )
