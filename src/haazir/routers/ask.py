@@ -65,6 +65,9 @@ async def ask(body: AskIn, ctx: Ctx) -> dict:
         query.cuisine = resolved["cuisine"]
     if query.dish is None:
         query.dish = resolved["dish"]
+    # A dish no cuisine rule knows ("lotus cake"), read from the menus themselves.
+    if query.dish is None and query.cuisine is None:
+        query.dish = await locate.dish_family_in(ctx.session, body.text)
     if query.area_id is not None and not locate.mentions_a_time(body.text):
         query.max_travel = None
 

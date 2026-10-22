@@ -170,3 +170,28 @@ async def resolve(session: AsyncSession, phrase: str | None) -> dict:
     if out["area_id"] is not None or out["cuisine"] or out["dish"]:
         out["by"] = "model"
     return out
+
+
+async def dish_family_in(session: AsyncSession, phrase: str | None) -> str | None:
+    """The longest dish family on a priced menu that the sentence names, if any.
+
+    The cuisine rules know "biryani" and "bbq"; they do not know "lotus cake", which exists
+    only because a bakery's owner typed it into their menu an hour ago. Read straight from the
+    menus, so any dish somebody can actually order is searchable by name.
+    """
+    if not phrase or len(phrase.strip()) < 4:
+        return None
+    return await session.scalar(
+        text(
+            """
+            SELECT d.family FROM dish d
+             WHERE length(d.family) >= 5
+               AND position(d.family IN lower(:q)) > 0
+               AND EXISTS (SELECT 1 FROM venue_dish vd
+                            WHERE vd.dish_id = d.id AND vd.price_pkr IS NOT NULL)
+             ORDER BY length(d.family) DESC
+             LIMIT 1
+            """
+        ),
+        {"q": phrase[:280]},
+    )

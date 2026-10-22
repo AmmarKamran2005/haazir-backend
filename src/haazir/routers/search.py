@@ -72,6 +72,9 @@ async def _ranked(body: SearchIn, ctx: Ctx) -> tuple[Query, dict, list[dict]]:
         q.cuisine = resolved["cuisine"]
     if q.dish is None:
         q.dish = resolved["dish"]
+    # A dish no cuisine rule knows ("lotus cake"), read from the menus themselves.
+    if q.dish is None and q.cuisine is None:
+        q.dish = await locate.dish_family_in(ctx.session, body.text)
 
     # Naming an area names a destination, and a travel cap the diner never typed must not
     # exclude it. Clients send a default (30 min) on every query; from Burns Road that puts

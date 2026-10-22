@@ -11,9 +11,21 @@ from .conftest import requires_db
 pytestmark = [pytest.mark.asyncio, requires_db]
 
 
-async def test_an_owner_dish_and_offer_are_public(client, venue_factory, user_factory):
+async def test_an_owner_dish_and_offer_are_public(client, user_factory):
+    from sqlalchemy import text
+
+    from haazir.db import service_session
+    from haazir.services import ingest_venues as ingest
+
+    from .test_search import venue
+
     owner_id, _ = await user_factory(role="owner")
-    venue_id = await venue_factory("Kababjees Bakers", claimed_by=owner_id)
+    # A venue as the ingest makes one, so ranked search considers it like any other.
+    async with service_session() as s:
+        await ingest.load_venues(s, [venue("kb1", "Kababjees Bakers")])
+        venue_id = await s.scalar(text("SELECT id FROM venue WHERE place_id = 'kb1'"))
+        await s.execute(text("UPDATE venue SET claimed_by = :u WHERE id = :v"),
+                        {"u": owner_id, "v": venue_id})
     owner = {"Authorization": f"Bearer {issue_access(owner_id, 'owner')}"}
 
     r = await client.post(f"/v1/owner/venues/{venue_id}/dishes",
@@ -44,6 +56,11 @@ async def test_an_owner_dish_and_offer_are_public(client, venue_factory, user_fa
     near = (await client.get("/v1/dishes/compare",
                              params={"dish": "lotus cake", "lat": 24.8615, "lng": 67.0180})).json()
     assert near["results"][0]["distance_m"] is not None
+
+    # Ranked search finds it by the dish name alone, though no cuisine rule knows the word.
+    res = (await client.post("/v1/search", json={"text": "lotus cake"})).json()
+    found = res["results"]
+    assert str(venue_id) in [row["venue_id"] for row in found], res
 
     r = await client.post(f"/v1/owner/venues/{venue_id}/offers",
                           json={"title": "Chai time", "discount_pct": 15, "days": [1, 2, 3],
