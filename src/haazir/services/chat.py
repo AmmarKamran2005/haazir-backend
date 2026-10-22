@@ -19,6 +19,7 @@ grounding quota today) costs nothing but the attempt.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import datetime as dt
 import json
 import logging
@@ -59,8 +60,8 @@ SYSTEM = (
     "- When a card deal applies to the user's bank, mention it with its discount.\n"
     "- For any question about a later time ('9 baje', 'tonight', 'kal'), call get_forecast "
     "and answer from it; never guess how busy a place will be.\n"
-    "- Say how busy a place is ONLY with its status phrase, as given (Abhi khali / Thoda "
-    "rush / Rush / Full ~N min wait). Never give a percentage, a number of tables, or the "
+    "- Say how busy a place is ONLY with its status phrase, as given (e.g. Abhi khali, Thoda "
+    "rush, Full ~20 min wait). Never give a percentage, a number of tables, or the "
     "words moderate, occupancy, band or estimate.\n"
     "- No markdown headings, no emoji, no greeting.\n"
     "- Follow the conversation. 'yahan', 'wahan', 'is restaurant', 'here', 'there' mean the "
@@ -160,7 +161,7 @@ def banks_in(text: str) -> list[str]:
 
 
 # The only words a customer sees for how busy a place is (FINALPLAN §0 rule 8): never a
-# percentage, never "moderate". Roman Urdu first, English after the slash.
+# percentage, never "moderate". Roman Urdu, English.
 PLAIN = {
     "free": ("Abhi khali", "free right now"),
     "moderate": ("Thoda rush", "a little busy"),
@@ -169,24 +170,30 @@ PLAIN = {
 }
 
 
-def status_phrase(band: str | None, wait_min: float | int | None = None) -> str | None:
+# The language of the turn being answered, so every phrase handed to the model is already in
+# the user's words; given both, the model pasted "thoda rush / a little busy" verbatim.
+_ROMAN: contextvars.ContextVar[bool] = contextvars.ContextVar("chat_roman", default=True)
+
+
+def status_phrase(band: str | None, wait_min: float | int | None = None,
+                  roman: bool | None = None) -> str | None:
     if band not in PLAIN:
         return None
-    roman, english = PLAIN[band]
+    phrase = PLAIN[band][0 if (_ROMAN.get() if roman is None else roman) else 1]
     wait = round(wait_min or 0)
     if band in ("busy", "full") and wait > 2:
-        roman, english = f"{roman}, ~{wait} min wait", f"{english}, ~{wait} min wait"
-    return f"{roman} / {english}"
+        phrase += f", ~{wait} min wait"
+    return phrase
 
 
-def compact(row: dict, deals: list[dict] | None = None) -> dict:
+def compact(row: dict, deals: list[dict] | None = None, roman: bool | None = None) -> dict:
     """A search row as the model sees it. Plain words and numbers, nothing internal."""
     live = row.get("live") or {}
     return {
         "slug": row["slug"],
         "name": row["name"],
         "area": row.get("area"),
-        "status": status_phrase(live.get("band"), live.get("wait_p50_min")),
+        "status": status_phrase(live.get("band"), live.get("wait_p50_min"), roman),
         "measured_now": live.get("source") == "live",
         "wait_min": round(live.get("wait_p50_min") or 0),
         "travel_min": row.get("travel_min"),
@@ -473,9 +480,7 @@ def template_reply(rows: list[dict], roman: bool) -> str:
                 "dekhein." if roman else
                 "Nothing matched that right now. Try a nearby area or a higher budget.")
     top = rows[0]
-    phrase = top.get("status") or ""
-    roman_part, _, english_part = phrase.partition(" / ")
-    status = roman_part if roman else english_part
+    status = top.get("status") or ""
     if status and "wait" not in status:
         status += ", " + wait_phrase(top.get("wait_min"), roman)
     deal = f" {top['deals'][0]}." if top.get("deals") else ""
@@ -612,6 +617,7 @@ async def respond(ctx: AuthContext, messages: list[dict], *, lat: float | None,
                   venue: str | None = None, context_venues: list[str] | None = None) -> dict:
     question = messages[-1]["content"]
     roman = is_roman_urdu(question)
+    _ROMAN.set(roman)
     cards = [deals_service.canonical_bank(c) for c in cards if c] or banks_in(question)
     agent = Agent(ctx, lat=lat, lng=lng, area=area, cards=cards)
 
